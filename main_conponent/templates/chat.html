@@ -1,0 +1,466 @@
+{% extends "layout.html" %}
+{% load static %}
+
+{% block style %}
+<style>
+    .container-md {
+      background-color: #f8f9fa;
+      padding: 20px 20px 20px 20px;
+      min-height: calc(100vh - 56px - 56px); /* 只减去导航栏高度 */
+      margin-top: 20px;
+      border-radius: 20px 20px 20px 20px; /* 修改为顶部圆角 */
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      position: relative;
+      padding-bottom: 80px;  /* 增加底部padding */
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .input-area {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: 100%;
+      padding: 20px 20px 20px 20px;
+      margin: 10px 0 0 0;
+      border-radius: 20px;
+      border: 1px solid #f6f3f3;
+      box-sizing: border-box;
+      min-height: 70px;  /* 增加最小高度 */
+      line-height: 1.5;  /* 增加行高 */
+      font-size: 16px;   /* 调整字体大小 */
+    }
+
+    .container-md #sendButton {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+    }
+    .container-md #newChatButton {
+      position: absolute;
+      bottom: 100px;
+      right: 10px;
+    }
+    .content-area {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      margin-bottom: 10px;
+      max-height: calc(100vh - 200px);
+      overflow-y: auto;
+      padding: 10px;
+      width: 100%;
+    }
+    img {
+      border-radius: 10px;
+    }
+    .user-message {
+      display: inline-block;
+      margin-bottom: 15px;
+      padding: 10px 15px;
+      border-radius: 10px;
+      width: fit-content;
+      max-width: 80%;
+      background-color: #d1e7ff;
+      align-self: flex-end;
+      word-wrap: break-word;
+    }
+    .assistant-message {
+      display: inline-block;
+      margin-bottom: 15px;
+      padding: 10px 15px;
+      border-radius: 10px;
+      width: fit-content;
+      max-width: 80%;
+      background-color: #f0f0f0;
+      align-self: flex-start;
+      word-wrap: break-word;
+    }
+    .typing-indicator {
+      display: inline-block;
+      padding: 10px 15px;
+      background-color: #f0f0f0;
+      border-radius: 10px;
+      margin-bottom: 15px;
+      width: fit-content;
+      align-self: flex-start;
+    }
+    .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #888;
+      animation: wave 1.3s linear infinite;
+    }
+    .dot:nth-child(2) {
+      animation-delay: -1.1s;
+    }
+    .dot:nth-child(3) {
+      animation-delay: -0.9s;
+    }
+    @keyframes wave {
+      0%, 60%, 100% {
+        transform: initial;
+      }
+      30% {
+        transform: translateY(-5px);
+      }
+    }
+    .response-time {
+      font-size: 0.8em;
+      color: #888;
+      margin-top: 5px;
+      text-align: right;
+    }
+    
+    /* 侧边栏样式 */
+    .sidebar {
+      position: fixed;
+      top: 77px; /* 导航栏高度 */
+      left: 0;
+      height: calc(100vh - 77px - 27px);
+      width: 200px;
+      background-color: #f8f9fa;
+      padding-top: 20px;
+      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+      z-index: 100;
+      transition: all 0.3s;
+      border-radius: 0 20px 20px 0;
+    }
+    
+    .sidebar-header {
+      padding: 15px;
+      border-bottom: 1px solid #dee2e6;
+    }
+    
+    .sidebar-header .form-select {
+      width: 100%;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #dee2e6;
+      background-color: white;
+      font-size: 14px;
+    }
+    
+    .sidebar-header .form-select:focus {
+      border-color: #0d6efd;
+      box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+    }
+    
+    .sidebar-menu {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      padding-top: 10px;
+    }
+    
+    .sidebar-menu li {
+      padding: 10px 15px;
+      border-bottom: 1px solid #eee;
+    }
+    
+    .sidebar-menu li a {
+      color: #333;
+      text-decoration: none;
+      display: block;
+    }
+    
+    .sidebar-menu li:hover {
+      background-color: #e9ecef;
+    }
+    
+    .sidebar-menu li.active {
+      background-color: #e9ecef;
+      border-left: 4px solid #0d6efd;
+    }
+    
+    .sidebar-menu li.active a {
+      color: #0d6efd;
+    }
+    
+    /* 主内容区域调整 */
+    .main-content {
+      margin-left: 250px;
+      transition: all 0.3s;
+    }
+    
+    /* 响应式设计 */
+    @media (max-width: 768px) {
+      .sidebar {
+        margin-left: -250px;
+      }
+      
+      .sidebar.active {
+        margin-left: 0;
+      }
+      
+      .main-content {
+        margin-left: 0;
+      }
+      
+      .main-content.active {
+        margin-left: 250px;
+      }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+  <!-- 侧边栏 -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <select class="form-select" id="modelSelect">
+        <option selected>选择助手</option>
+        <option value="xiaozhi">小智</option>
+        <option value="xiaomei">小美</option>
+        <option value="xiaoqiang">小强</option>
+        <option value="xiaoming">小明</option>
+        <option value="xiaoli">小李</option>
+      </select>
+    </div>
+    <ul class="sidebar-menu" id="chatHistory">
+      <!-- 聊天历史记录将在这里动态添加 -->
+    </ul>
+  </div>
+
+  <!-- 主内容区域 -->
+  <div class="main-content">
+    <div class="container-md">
+      <div class="content-area" id="chatMessages">
+        <div class="text-center mb-1">
+          <img src="{% static 'images/government_service.png' %}" class="img-fluid" style="max-height: 200px;">
+        </div>
+        <h5 class="text-center mb-4">智能对话助手</h5>
+        <!-- 初始欢迎消息 -->
+        <div class="assistant-message">
+          您好！我是基于RagFlow的智能助手，请问有什么可以帮助您的？
+        </div>
+      </div>
+      
+      <textarea class="form-control input-area" id="userInput" placeholder="问我任何问题，按Shift+Enter换行" aria-label="用户输入"></textarea>
+      <button class="btn btn-sm btn-primary" type="button" id="sendButton"><i class="fa-solid fa-microphone"></i></button>
+
+      <button class="btn btn-sm btn-primary" type="button" id="newChatButton">New Chat</button>
+    </div>
+  </div>
+{% endblock %}
+
+{% block script %}
+<script>
+    $(document).ready(function() {
+      const chatMessages = $('#chatMessages');
+      const userInput = $('#userInput');
+      const sendButton = $('#sendButton');
+      const newChatButton = $('#newChatButton');
+      const typingIndicator = $('#typingIndicator');
+      const modelSelect = $('#modelSelect');
+      
+      // 自动调整文本框高度
+      userInput.on('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+      });
+      
+      // 处理Shift+Enter换行
+      userInput.on('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+      
+      // 发送按钮点击事件
+      sendButton.on('click', sendMessage);
+
+      // New Chat 按钮点击事件
+      newChatButton.on('click', function() {
+        // 清空聊天区域
+        chatMessages.empty();
+        // 添加初始欢迎消息
+        chatMessages.append('<div class="assistant-message">您好！我是基于RagFlow的智能助手，请问有什么可以帮助您的？</div>');
+      });
+        
+      // 滚动到底部
+      function scrollToBottom() {
+        chatMessages.scrollTop(chatMessages[0].scrollHeight);
+      }
+      
+      // 初始滚动到底部
+      scrollToBottom();
+      
+      // 发送消息函数
+      function sendMessage() {
+        const message = userInput.val().trim();
+        if (!message) return;
+        
+        // 添加用户消息到聊天区域
+        chatMessages.append(`
+          <div class="user-message">
+            ${message.replace(/\n/g, '<br>')}
+          </div>
+        `);
+        
+        // 清空输入框并重置高度
+        userInput.val('');
+        userInput.css('height', 'auto');
+        
+        // 移除旧的打字指示器（如果存在）
+        $('.typing-indicator').remove();
+        
+        // 添加新的打字指示器到最新消息后
+        chatMessages.append(`
+          <div class="typing-indicator">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+          </div>
+        `);
+        
+        scrollToBottom();
+        
+        // 禁用输入和发送按钮
+        userInput.prop('disabled', true);
+        sendButton.prop('disabled', true);
+        
+        // 发送请求到后端
+        console.log("准备发送请求:", message);
+        $.ajax({
+          url: '{% url "chat_with_model" %}',
+          type: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify({ message: message }),
+          timeout: 180000,
+          success: function(data) {
+            // 移除打字指示器
+            $('.typing-indicator').remove();
+            
+            // 添加助手回复
+            let responseHtml = `
+              <div class="message assistant-message">
+                ${data.response.replace(/\n/g, '<br>')}`;
+                
+            // 如果有响应时间，显示它
+            if (data.elapsed_time) {
+              responseHtml += `
+                <div class="response-time">
+                  响应时间: ${data.elapsed_time}秒
+                </div>`;
+            }
+            
+            responseHtml += `</div>`;
+            chatMessages.append(responseHtml);
+            
+            // 启用输入和发送按钮
+            userInput.prop('disabled', false);
+            sendButton.prop('disabled', false);
+            userInput.focus();
+            
+            scrollToBottom();
+          },
+          error: function(xhr, status, error) {
+            console.error("AJAX错误详情:", {
+              status: status,
+              error: error,
+              responseText: xhr.responseText
+            });
+            // 移除打字指示器
+            $('.typing-indicator').remove();
+            
+            // 显示错误消息
+            let errorMessage = "发生未知错误";
+            
+            if (status === 'timeout') {
+              errorMessage = "请求超时，模型响应时间过长。请尝试更简短的问题或稍后再试。";
+            } else {
+              try {
+                const response = JSON.parse(xhr.responseText);
+                if (response && response.message) {
+                  errorMessage = response.message;
+                }
+              } catch (e) {
+                errorMessage = `请求失败: ${error || status}`;
+              }
+            }
+            
+            chatMessages.append(`
+              <div class="message assistant-message" style="background-color: #ffdddd;">
+                <strong>错误:</strong> ${errorMessage}
+              </div>
+            `);
+            
+            // 启用输入和发送按钮
+            userInput.prop('disabled', false);
+            sendButton.prop('disabled', false);
+            
+            scrollToBottom();
+          }
+        });
+      }
+      
+      // 侧边栏切换功能
+      $('#sidebarToggle').on('click', function() {
+        $('.sidebar').toggleClass('active');
+        $('.main-content').toggleClass('active');
+      });
+      
+      // 模型选择变化事件
+      modelSelect.on('change', function() {
+        const selectedModel = $(this).val();
+        if (selectedModel === "选择助手") return;
+        
+        // 清空聊天区域
+        chatMessages.empty();
+        
+        // 根据选择的助手显示不同的欢迎消息
+        let welcomeMessage = "您好！";
+        var ragflow_chat_id = null;
+        var ragflow_model = null;
+        switch(selectedModel) {
+          case "xiaozhi":
+            welcomeMessage += "我是小智，擅长通用对话和问题解答，我只会根据知识库进行回答。";
+            ragflow_chat_id = "cb3bd490058811f081b00242ac120004";  
+            ragflow_model = "deepseek-r1-distill-qwen-7b@Tongyi-Qianwen";
+            break;
+          case "xiaomei":
+            welcomeMessage += "我是小美，我会加入自己的总结。";
+            ragflow_chat_id = "0cca3740057e11f0b0320242ac120004";
+            ragflow_model = "deepseek-v3@Tongyi-Qianwen";
+            break;
+          case "xiaoqiang":
+            welcomeMessage += "我是小强，擅长技术支持和编程指导。";
+            break;
+          case "xiaoming":
+            welcomeMessage += "我是小明，擅长数据分析和逻辑推理。";
+            break;
+          case "xiaoli":
+            welcomeMessage += "我是小李，擅长知识科普和学习辅导。";
+            break;
+        }
+        
+        // 添加欢迎消息
+        chatMessages.append(`
+          <div class="assistant-message">
+            ${welcomeMessage}
+          </div>
+        `);
+
+        $.ajax({
+          url: '{% url "set_model" %}',
+          type: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify({ ragflow_chat_id: ragflow_chat_id, ragflow_model: ragflow_model }),
+          success: function(data) {
+            console.log("模型设置成功");
+          },
+          error: function(xhr, status, error) {
+            console.error("模型设置失败:", error);
+          }
+        });
+      });
+    });
+  </script>
+{% endblock %}
+
+
+

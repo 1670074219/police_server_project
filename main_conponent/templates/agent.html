@@ -1,0 +1,258 @@
+{% extends "layout.html" %}
+{% load static %}
+
+{% block style %}
+<style>
+    /* 重置页面默认边距 */
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    /* 主容器样式 */
+    .container-md {
+      background-color: #f8f9fa;
+      padding: 0;
+      height: calc(100vh - 77px); /* 只减去导航栏高度 */
+      margin: 0; /* 移除所有外边距 */
+      border-radius: 0; /* 移除圆角 */
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      position: relative;
+      box-sizing: border-box;
+      overflow: hidden;  /* 只在容器内设置 overflow: hidden */
+      max-width: 1320px;  /* 添加最大宽度 */
+      width: 100%;  /* 添加宽度 */
+      border-radius: 20px 20px 20px 20px;
+    }
+
+    /* iframe 容器样式 */
+    .iframe-container {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    /* iframe 样式 */
+    .iframe-container iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+    }
+
+    /* 主内容区域调整 */
+    .main-content {
+      margin-left: 200px;
+      min-height: calc(100vh - 77px);
+      padding-top: 77px;  /* 确保内容不会被导航栏遮挡 */
+      box-sizing: border-box;
+      display: flex;
+      justify-content: center;
+      width: calc(100% - 200px);
+    }
+
+    /* 侧边栏样式调整 */
+    .sidebar {
+      position: fixed;
+      top: 77px;  /* 确保在导航栏下方 */
+      left: 0;
+      height: calc(100vh - 77px);
+      width: 200px;
+      background-color: #f8f9fa;
+      box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+      z-index: 1;  /* 降低z-index，确保不会遮挡导航栏 */
+      border-radius: 0 20px 20px 0;
+    }
+
+    /* 导航栏样式调整 */
+    .navbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1030;  /* 确保导航栏在最上层 */
+      background-color: #fff;
+    }
+
+    .sidebar-header {
+      padding: 15px;
+      border-bottom: 1px solid #dee2e6;
+    }
+    
+    .sidebar-header .form-select {
+      width: 100%;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #dee2e6;
+      background-color: white;
+      font-size: 14px;
+    }
+    
+    .sidebar-header .form-select:focus {
+      border-color: #0d6efd;
+      box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+    }
+    
+    .sidebar-menu {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      padding-top: 10px;
+    }
+    
+    .sidebar-menu li {
+      padding: 10px 15px;
+      border-bottom: 1px solid #eee;
+    }
+    
+    .sidebar-menu li a {
+      color: #333;
+      text-decoration: none;
+      display: block;
+    }
+    
+    .sidebar-menu li:hover {
+      background-color: #e9ecef;
+    }
+    
+    .sidebar-menu li.active {
+      background-color: #e9ecef;
+      border-left: 4px solid #0d6efd;
+    }
+    
+    .sidebar-menu li.active a {
+      color: #0d6efd;
+    }
+    
+    /* 修改侧边栏菜单样式 */
+    .sidebar-menu .nav-link {
+      padding: 8px 15px;
+      color: #666;
+      text-decoration: none;
+      border-radius: 4px;
+      margin: 4px 8px;
+      transition: all 0.2s;
+    }
+
+    .sidebar-menu .nav-link:hover {
+      color: #0d6efd;
+      background-color: #f8f9fa;
+    }
+
+    .sidebar-menu .nav-link.active {
+      color: #fff;
+      background-color: #0d6efd;
+      font-weight: 500;
+      border-radius: 20px 20px 20px 20px;
+    }
+
+    .sidebar-menu .nav-link.disabled {
+      color: #999;
+      pointer-events: none;
+      background-color: transparent;
+    }
+
+    /* 移除之前的边框样式 */
+    .sidebar-menu .nav-link,
+    .sidebar-menu .nav-link.active {
+      border-left: none;
+    }
+
+    /* 图标样式 */
+    .sidebar-menu i {
+      margin-right: 8px;
+    }
+
+    /* 激活状态下图标颜色 */
+    .sidebar-menu .nav-link.active i {
+      color: #fff;
+    }
+
+    /* 非激活状态下的图标和文字颜色 */
+    .sidebar-menu .nav-link:not(.active) {
+      color: #666;
+    }
+
+    .sidebar-menu .nav-link:not(.active):hover {
+      color: #0d6efd;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+  
+  <!-- 侧边栏 -->
+  <div class="sidebar">
+    <ul class="nav flex-column sidebar-menu">
+      <li class="nav-item">
+        <a class="nav-link active" href="#">
+          <i class="bi bi-file-text"></i> 联网搜索Agent
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" href="#">
+          <i class="bi bi-gear"></i> 招聘助手Agent
+        </a>
+      </li>
+    </ul>
+  </div>
+
+  <!-- 主内容区域 -->
+  <div class="main-content">
+    <div class="container-md">
+      <div class="iframe-container">
+        <iframe
+          src="http://192.168.101.206/chat/share?shared_id=503ebe06058d11f09d3e0242ac120004&from=agent&auth=Q4NDg2Mjc0MDQ4YTExZjBhYjQwMDI0Mm&visible_avatar=1&locale=zh"
+          frameborder="0"
+        ></iframe>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block script %}
+<script>
+    $(document).ready(function() {  
+      // 侧边栏切换功能
+      $('#sidebarToggle').on('click', function() {
+        $('.sidebar').toggleClass('active');
+        $('.main-content').toggleClass('active');
+      });
+
+      // 侧边栏菜单项点击事件
+      $('.sidebar-menu .nav-link').on('click', function(e) {
+        e.preventDefault();
+        
+        // 移除其他项的激活状态
+        $('.sidebar-menu .nav-link').removeClass('active');
+        
+        // 添加当前项的激活状态
+        $(this).addClass('active');
+        
+        // 获取点击的菜单文本
+        const menuText = $(this).text().trim();
+        console.log('选中菜单:', menuText);
+        
+        // 根据不同的菜单项执行不同的操作
+        switch(menuText) {
+          case '联网搜索Agent':
+            // 更新 iframe 的 src
+            $('iframe').attr('src', 'http://192.168.101.206/chat/share?shared_id=503ebe06058d11f09d3e0242ac120004&from=agent&auth=Q4NDg2Mjc0MDQ4YTExZjBhYjQwMDI0Mm&visible_avatar=1&locale=zh');
+            break;
+          case '招聘助手Agent':
+            // 更新 iframe 的 src
+            $('iframe').attr('src', 'http://192.168.101.206/chat/share?shared_id=ad81aa08059011f0a19e0242ac120004&from=agent&auth=Q4NDg2Mjc0MDQ4YTExZjBhYjQwMDI0Mm&locale=zh');
+            break;
+        }
+      });
+    });
+  </script>
+{% endblock %}
+
+
+
