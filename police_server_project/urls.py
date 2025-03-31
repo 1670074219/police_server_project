@@ -30,4 +30,6 @@ urlpatterns = [
     path('agent_page', agent.agent_page, name='agent_page'),
 
     path('api/process_voice', chat.process_voice, name='process_voice'),
+
+    path('api/text_to_speech', chat.text_to_speech, name='text_to_speech'),
 ]

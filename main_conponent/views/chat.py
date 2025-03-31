@@ -1,6 +1,6 @@
 from django.shortcuts import render
 import os
-from django.http import JsonResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from dashscope.audio.asr import TranslationRecognizerChat, TranslationRecognizerCallback
 from dashscope.audio.asr import TranscriptionResult, TranslationResult
@@ -10,6 +10,9 @@ import wave
 from pydub import AudioSegment
 import io
 import time
+from dashscope.audio.tts_v2 import SpeechSynthesizer, AudioFormat
+import pyaudio
+import json
 
 # 设置 FFmpeg 路径
 ffmpeg_path = r"D:\Desktop\ffmpeg-master-latest-win64-gpl\bin"
@@ -193,4 +196,89 @@ def process_voice(request):
             logger.error(f"处理语音请求时发生错误: {str(e)}")
             return JsonResponse({'error': f'服务器错误: {str(e)}'}, status=500)
     
+    return JsonResponse({'error': '不支持的请求方法'}, status=400)
+
+class TTSCallback:
+    def __init__(self):
+        self.audio_data = []
+        self.is_complete = False
+        self.error = None
+
+    def on_open(self) -> None:
+        logger.info('语音合成开始')
+
+    def on_close(self) -> None:
+        logger.info('语音合成结束')
+        self.is_complete = True
+
+    def on_error(self, message: str):
+        logger.error(f'语音合成错误: {message}')
+        self.error = message
+
+    def on_event(self, message):
+        logger.info(f'语音合成事件: {message}')
+
+    def on_data(self, data: bytes) -> None:
+        logger.info(f'收到音频数据: {len(data)} 字节')
+        self.audio_data.append(data)
+
+    def on_complete(self):
+        logger.info('语音合成完成')
+        self.is_complete = True
+
+@csrf_exempt
+def text_to_speech(request):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            text = data.get('text')
+            if not text:
+                return JsonResponse({'error': '没有收到文本'}, status=400)
+
+            callback = TTSCallback()
+            synthesizer = SpeechSynthesizer(
+                model="cosyvoice-v1",      # 使用正确的模型
+                voice="longshuo",      # 使用正确的声音
+                format=AudioFormat.PCM_16000HZ_MONO_16BIT,  # 使用16kHz采样率
+                callback=callback
+            )
+
+            # 发送文本进行合成
+            synthesizer.streaming_call(text)
+            synthesizer.streaming_complete()
+
+            # 等待合成完成
+            wait_time = 0
+            while not callback.is_complete and wait_time < 30:
+                time.sleep(0.1)
+                wait_time += 0.1
+
+            if callback.error:
+                return JsonResponse({'error': f'语音合成错误: {callback.error}'}, status=500)
+
+            if not callback.audio_data:
+                return JsonResponse({'error': '没有得到音频数据'}, status=500)
+
+            # 将PCM数据转换为WAV格式
+            import wave
+            import io
+
+            wav_buffer = io.BytesIO()
+            with wave.open(wav_buffer, 'wb') as wav_file:
+                wav_file.setnchannels(1)  # 单声道
+                wav_file.setsampwidth(2)  # 16位采样
+                wav_file.setframerate(16000)  # 采样率
+                for chunk in callback.audio_data:
+                    wav_file.writeframes(chunk)
+
+            # 返回WAV数据
+            wav_buffer.seek(0)
+            response = StreamingHttpResponse(wav_buffer, content_type='audio/wav')
+            response['Content-Disposition'] = 'attachment; filename="speech.wav"'
+            return response
+
+        except Exception as e:
+            logger.error(f"语音合成错误: {str(e)}")
+            return JsonResponse({'error': f'服务器错误: {str(e)}'}, status=500)
+
     return JsonResponse({'error': '不支持的请求方法'}, status=400)

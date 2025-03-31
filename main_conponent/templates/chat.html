@@ -55,6 +55,7 @@
       border-radius: 10px;
     }
     .user-message {
+      position: relative;
       display: inline-block;
       margin-bottom: 15px;
       padding: 10px 15px;
@@ -66,6 +67,7 @@
       word-wrap: break-word;
     }
     .assistant-message {
+      position: relative;
       display: inline-block;
       margin-bottom: 15px;
       padding: 10px 15px;
@@ -203,6 +205,29 @@
         margin-left: 250px;
       }
     }
+
+    .message-buttons {
+      position: absolute;
+      top: -20px;
+      right: 0;
+      display: none;
+    }
+    .user-message:hover .message-buttons,
+    .assistant-message:hover .message-buttons {
+      display: block;
+    }
+    .message-buttons button {
+      padding: 2px 5px;
+      margin-left: 5px;
+      font-size: 12px;
+      background-color: #fff;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .message-buttons button:hover {
+      background-color: #f8f9fa;
+    }
 </style>
 {% endblock %}
 
@@ -297,6 +322,10 @@
         // 添加用户消息到聊天区域
         chatMessages.append(`
           <div class="user-message">
+            <div class="message-buttons">
+              <button class="copy-btn"><i class="fas fa-copy"></i> 复制</button>
+              <button class="speak-btn"><i class="fas fa-volume-up"></i> 播报</button>
+            </div>
             ${message.replace(/\n/g, '<br>')}
           </div>
         `);
@@ -338,6 +367,10 @@
             // 添加助手回复
             let responseHtml = `
               <div class="message assistant-message">
+                <div class="message-buttons">
+                  <button class="copy-btn"><i class="fas fa-copy"></i></button>
+                  <button class="speak-btn"><i class="fas fa-volume-up"></i></button>
+                </div>
                 ${data.response.replace(/\n/g, '<br>')}`;
                 
             // 如果有响应时间，显示它
@@ -559,6 +592,73 @@
           isRecording = false;
           microphoneButton.removeClass('btn-danger').addClass('btn-primary');
         }
+      });
+
+      // 添加语音播放功能
+      $(document).on('click', '.speak-btn', async function() {
+        const messageDiv = $(this).closest('.user-message, .assistant-message');
+        const text = messageDiv.clone().children().remove().end().text().trim();
+        
+        try {
+          // 显示加载状态
+          const speakBtn = $(this);
+          speakBtn.prop('disabled', true);
+          speakBtn.html('<i class="fas fa-spinner fa-spin"></i>');
+          
+          const response = await fetch('{% url "text_to_speech" %}', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ text: text })
+          });
+          
+          if (!response.ok) {
+            throw new Error('语音合成失败');
+          }
+          
+          // 获取音频数据并播放
+          const audioBlob = await response.blob();
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+          
+          audio.onended = function() {
+            URL.revokeObjectURL(audioUrl);
+            speakBtn.prop('disabled', false);
+            speakBtn.html('<i class="fas fa-volume-up"></i>');
+          };
+          
+          audio.onerror = function() {
+            URL.revokeObjectURL(audioUrl);
+            speakBtn.prop('disabled', false);
+            speakBtn.html('<i class="fas fa-volume-up"></i>');
+            alert('音频播放失败');
+          };
+          
+          await audio.play();
+          
+        } catch (error) {
+          console.error('语音播放错误:', error);
+          alert('语音播放失败，请重试');
+          $(this).prop('disabled', false).html('<i class="fas fa-volume-up"></i>');
+        }
+      });
+
+      // 添加复制功能
+      $(document).on('click', '.copy-btn', function() {
+        const messageDiv = $(this).closest('.user-message, .assistant-message');
+        const text = messageDiv.clone().children().remove().end().text().trim();
+        
+        navigator.clipboard.writeText(text).then(function() {
+          const copyBtn = $(this);
+          copyBtn.html('<i class="fas fa-check"></i>');
+          setTimeout(() => {
+            copyBtn.html('<i class="fas fa-copy"></i>');
+          }, 1000);
+        }).catch(function(err) {
+          console.error('复制失败:', err);
+          alert('复制失败，请重试');
+        });
       });
     });
   </script>
