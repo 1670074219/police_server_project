@@ -362,7 +362,8 @@
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             const messageContent = assistantMessageDiv.find('.message-content');
-            let buffer = '';  // 用于存储未完成的数据
+            let buffer = '';
+            let audioPath = null;
 
             while (true) {
                 const { value, done } = await reader.read();
@@ -370,13 +371,12 @@
 
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
-                buffer = lines.pop() || '';  // 保存最后一个不完整的行
+                buffer = lines.pop() || '';
 
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
                         const data = line.slice(6);
                         if (data === '[DONE]') {
-                            // 处理结束标记
                             break;
                         }
                         try {
@@ -384,6 +384,11 @@
                             if (parsed.content) {
                                 messageContent.append(parsed.content);
                                 scrollToBottom();
+                            } else if (parsed.audio_path) {
+                                audioPath = parsed.audio_path;
+                                // 自动播放生成的语音
+                                const audio = new Audio(`/api/get_audio/${audioPath}`);
+                                await audio.play();
                             } else if (parsed.error) {
                                 messageContent.append(`<div class="error-message">${parsed.error}</div>`);
                                 scrollToBottom();

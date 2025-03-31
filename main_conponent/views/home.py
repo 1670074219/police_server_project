@@ -1,5 +1,5 @@
 from django.shortcuts import HttpResponse, render
-from django.http import JsonResponse, StreamingHttpResponse
+from django.http import JsonResponse, StreamingHttpResponse, FileResponse
 from django.views.decorators.csrf import csrf_exempt
 import json
 import logging
@@ -7,6 +7,10 @@ import time
 from ..services.ragflow_service import RagFlowService
 from openai import OpenAI
 import dashscope
+from ..services.tts_service import TTSManager
+import asyncio
+from asgiref.sync import sync_to_async
+import os
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +29,8 @@ ragflow_service = RagFlowService(
     model_name=RAGFLOW_MODEL,
     chat_id=RAGFLOW_CHAT_ID
 )
+
+tts_manager = TTSManager()
 
 def home_page(request):
     # 简化视图，不再使用数据库
@@ -51,21 +57,48 @@ def generate_response(message):
     """生成流式响应"""
     try:
         # 发送心跳保持连接
-        yield 'retry: 1000\n\n'  # 重连间隔为1秒
+        yield 'retry: 1000\n\n'
         
-        response = ragflow_service.client.chat.completions.create(
-            model=ragflow_service.model_name,
-            messages=[
-                {"role": "user", "content": message}
-            ],
+        # 使用 dashscope 替代 ragflow
+        response = dashscope.Generation.call(
+            model='qwen-max',
+            messages=[{"role": "user", "content": message}],
             stream=True
         )
         
+        # 收集完整的响应文本用于语音合成
+        full_text = ""
+        last_content = ""  # 用于跟踪上一次的内容
+        
         for chunk in response:
-            if hasattr(chunk.choices[0].delta, 'content'):
-                content = chunk.choices[0].delta.content
-                if content:
-                    yield f"data: {json.dumps({'content': content})}\n\n"
+            if chunk.status_code == 200:
+                if chunk.output and chunk.output.text:
+                    current_content = chunk.output.text
+                    # 只发送新增的内容
+                    if current_content != last_content:
+                        # 获取新增的部分
+                        new_content = current_content[len(last_content):]
+                        if new_content:  # 只有在有新内容时才发送
+                            full_text += new_content
+                            yield f"data: {json.dumps({'content': new_content})}\n\n"
+                        last_content = current_content
+            else:
+                error_msg = f'请求失败: {chunk.code}'
+                logger.error(error_msg)
+                yield f"data: {json.dumps({'error': error_msg})}\n\n"
+                return
+        
+        # 生成语音文件
+        if full_text:
+            try:
+                audio_path = asyncio.run(tts_manager.synthesize_speech(full_text))
+                # 只返回文件名，不包含 tts_temp 目录
+                file_name = os.path.basename(audio_path)
+                # 发送语音文件路径
+                yield f"data: {json.dumps({'audio_path': file_name})}\n\n"
+            except Exception as e:
+                logger.error(f"语音合成错误: {str(e)}")
+                yield f"data: {json.dumps({'error': f'语音合成错误: {str(e)}'})}\n\n"
         
         # 发送结束标记
         yield "data: [DONE]\n\n"
@@ -97,3 +130,24 @@ def chat_with_model(request):
             return JsonResponse({'error': str(e)}, status=500)
             
     return JsonResponse({'error': '不支持的请求方法'}, status=400)
+
+def get_audio_file(request, file_path):
+    try:
+        # 确保文件路径不包含目录遍历
+        safe_file_path = os.path.basename(file_path)
+        full_path = os.path.join(tts_manager.tts_cache_dir, safe_file_path)
+        
+        # 验证文件是否存在
+        if not os.path.exists(full_path):
+            logger.error(f"音频文件不存在: {full_path}")
+            return JsonResponse({'error': '音频文件不存在'}, status=404)
+            
+        # 验证文件是否在允许的目录中
+        if not os.path.abspath(full_path).startswith(os.path.abspath(tts_manager.tts_cache_dir)):
+            logger.error(f"非法的文件路径: {full_path}")
+            return JsonResponse({'error': '非法的文件路径'}, status=403)
+            
+        return FileResponse(open(full_path, 'rb'), content_type='audio/wav')
+    except Exception as e:
+        logger.error(f"获取音频文件错误: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)

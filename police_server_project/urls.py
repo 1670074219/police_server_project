@@ -32,4 +32,6 @@ urlpatterns = [
     path('api/process_voice', chat.process_voice, name='process_voice'),
 
     path('api/text_to_speech', chat.text_to_speech, name='text_to_speech'),
+
+    path('api/get_audio/<str:file_path>', home.get_audio_file, name='get_audio_file'),
 ]
