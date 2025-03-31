@@ -363,7 +363,35 @@
             const decoder = new TextDecoder();
             const messageContent = assistantMessageDiv.find('.message-content');
             let buffer = '';
-            let audioPath = null;
+            let audioQueue = [];  // 音频队列
+            let isPlaying = false;  // 是否正在播放
+
+            // 播放音频队列的函数
+            async function playNextAudio() {
+                if (audioQueue.length > 0 && !isPlaying) {
+                    isPlaying = true;
+                    const audioPath = audioQueue.shift();
+                    const audio = new Audio(`/api/get_audio/${audioPath}`);
+                    
+                    audio.onended = () => {
+                        isPlaying = false;
+                        playNextAudio();  // 播放下一个
+                    };
+                    
+                    audio.onerror = () => {
+                        isPlaying = false;
+                        playNextAudio();  // 出错时也继续播放下一个
+                    };
+                    
+                    try {
+                        await audio.play();
+                    } catch (e) {
+                        console.error('播放音频失败:', e);
+                        isPlaying = false;
+                        playNextAudio();
+                    }
+                }
+            }
 
             while (true) {
                 const { value, done } = await reader.read();
@@ -385,10 +413,10 @@
                                 messageContent.append(parsed.content);
                                 scrollToBottom();
                             } else if (parsed.audio_path) {
-                                audioPath = parsed.audio_path;
-                                // 自动播放生成的语音
-                                const audio = new Audio(`/api/get_audio/${audioPath}`);
-                                await audio.play();
+                                // 将音频文件添加到队列
+                                audioQueue.push(parsed.audio_path);
+                                // 尝试播放
+                                playNextAudio();
                             } else if (parsed.error) {
                                 messageContent.append(`<div class="error-message">${parsed.error}</div>`);
                                 scrollToBottom();

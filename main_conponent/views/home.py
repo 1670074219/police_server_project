@@ -56,51 +56,62 @@ def set_model(request):
 def generate_response(message):
     """生成流式响应"""
     try:
-        # 发送心跳保持连接
         yield 'retry: 1000\n\n'
         
-        # 使用 dashscope 替代 ragflow
         response = dashscope.Generation.call(
             model='qwen-max',
             messages=[{"role": "user", "content": message}],
             stream=True
         )
         
-        # 收集完整的响应文本用于语音合成
-        full_text = ""
-        last_content = ""  # 用于跟踪上一次的内容
+        last_content = ""
+        current_sentence = ""
         
         for chunk in response:
             if chunk.status_code == 200:
                 if chunk.output and chunk.output.text:
                     current_content = chunk.output.text
-                    # 只发送新增的内容
-                    if current_content != last_content:
-                        # 获取新增的部分
-                        new_content = current_content[len(last_content):]
-                        if new_content:  # 只有在有新内容时才发送
-                            full_text += new_content
-                            yield f"data: {json.dumps({'content': new_content})}\n\n"
+                    # 获取新增的文本
+                    new_text = current_content[len(last_content):]
+                    if new_text:
+                        # 更新最后的内容
                         last_content = current_content
+                        
+                        # 处理新文本
+                        for char in new_text:
+                            current_sentence += char
+                            # 发送字符到前端
+                            yield f"data: {json.dumps({'content': char})}\n\n"
+                            
+                            # 检查是否句子结束
+                            if char in ['。', '！', '？', '.', '!', '?']:
+                                try:
+                                    # 异步生成语音
+                                    audio_path = asyncio.run(tts_manager.synthesize_speech(current_sentence))
+                                    file_name = os.path.basename(audio_path)
+                                    # 发送语音文件路径
+                                    yield f"data: {json.dumps({'audio_path': file_name, 'text': current_sentence})}\n\n"
+                                    # 清空当前句子
+                                    current_sentence = ""
+                                except Exception as e:
+                                    logger.error(f"语音合成错误: {str(e)}")
+                                    yield f"data: {json.dumps({'error': f'语音合成错误: {str(e)}'})}\n\n"
             else:
                 error_msg = f'请求失败: {chunk.code}'
                 logger.error(error_msg)
                 yield f"data: {json.dumps({'error': error_msg})}\n\n"
                 return
         
-        # 生成语音文件
-        if full_text:
+        # 处理最后一个不完整的句子
+        if current_sentence:
             try:
-                audio_path = asyncio.run(tts_manager.synthesize_speech(full_text))
-                # 只返回文件名，不包含 tts_temp 目录
+                audio_path = asyncio.run(tts_manager.synthesize_speech(current_sentence))
                 file_name = os.path.basename(audio_path)
-                # 发送语音文件路径
-                yield f"data: {json.dumps({'audio_path': file_name})}\n\n"
+                yield f"data: {json.dumps({'audio_path': file_name, 'text': current_sentence})}\n\n"
             except Exception as e:
                 logger.error(f"语音合成错误: {str(e)}")
                 yield f"data: {json.dumps({'error': f'语音合成错误: {str(e)}'})}\n\n"
         
-        # 发送结束标记
         yield "data: [DONE]\n\n"
                     
     except Exception as e:
