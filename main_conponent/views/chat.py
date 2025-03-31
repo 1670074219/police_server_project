@@ -1,4 +1,196 @@
 from django.shortcuts import render
+import os
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from dashscope.audio.asr import TranslationRecognizerChat, TranslationRecognizerCallback
+from dashscope.audio.asr import TranscriptionResult, TranslationResult
+import dashscope
+import logging
+import wave
+from pydub import AudioSegment
+import io
+import time
+
+# 设置 FFmpeg 路径
+ffmpeg_path = r"D:\Desktop\ffmpeg-master-latest-win64-gpl\bin"
+os.environ["PATH"] += os.pathsep + ffmpeg_path
+
+# 设置 pydub 的路径
+AudioSegment.converter = os.path.join(ffmpeg_path, "ffmpeg.exe")
+AudioSegment.ffmpeg = os.path.join(ffmpeg_path, "ffmpeg.exe")
+AudioSegment.ffprobe = os.path.join(ffmpeg_path, "ffprobe.exe")
+
+# 设置日志
+logger = logging.getLogger(__name__)
+
+# 设置API key
+dashscope.api_key = "sk-d7b419aabe41461a99febae96b60b030"
 
 def chat_page(request):
     return render(request, 'chat.html')
+
+class ASRCallback(TranslationRecognizerCallback):
+    def __init__(self):
+        self.final_text = ""
+        self.error = None
+        self.is_finished = False
+        self.is_sentence_end = False
+        self.all_text = []  # 存储所有的中间结果
+        
+    def on_open(self) -> None:
+        logger.info('语音识别开始')
+        self.is_finished = False
+        self.is_sentence_end = False
+        self.all_text = []
+
+    def on_close(self) -> None:
+        logger.info('语音识别结束')
+        self.is_finished = True
+        # 合并所有结果
+        if self.all_text:
+            self.final_text = self.all_text[-1]
+
+    def on_error(self, error):
+        logger.error(f'语音识别错误: {error}')
+        self.error = error
+        self.is_finished = True
+
+    def on_event(
+        self,
+        request_id,
+        transcription_result: TranscriptionResult,
+        translation_result: TranslationResult,
+        usage,
+    ) -> None:
+        logger.info(f'收到事件: request_id={request_id}')
+        if transcription_result is not None:
+            logger.info(f'转录结果: {transcription_result.text}')
+            if transcription_result.text:
+                self.all_text.append(transcription_result.text)
+                self.final_text = transcription_result.text
+                if hasattr(transcription_result, 'is_sentence_end') and transcription_result.is_sentence_end:
+                    self.is_sentence_end = True
+                    logger.info('句子结束')
+        else:
+            logger.warning('没有转录结果')
+
+@csrf_exempt
+def process_voice(request):
+    if request.method == 'POST':
+        wav_path = None
+        try:
+            # 确保voice_temp目录存在
+            voice_temp_dir = 'voice_temp'
+            if not os.path.exists(voice_temp_dir):
+                os.makedirs(voice_temp_dir)
+            
+            # 检查是否有文件上传
+            if 'audio' not in request.FILES:
+                return JsonResponse({'error': '没有收到音频文件'}, status=400)
+            
+            # 读取上传的音频文件
+            audio_file = request.FILES['audio']
+            audio_data = audio_file.read()
+            
+            try:
+                # 使用pydub加载webm音频并转换
+                audio = AudioSegment.from_file(io.BytesIO(audio_data), format='webm')
+                logger.info(f'原始音频: 通道数={audio.channels}, 采样率={audio.frame_rate}, 时长={len(audio)/1000}秒')
+                
+                # 转换为单声道和16kHz采样率
+                if audio.channels != 1:
+                    audio = audio.set_channels(1)
+                if audio.frame_rate != 16000:
+                    audio = audio.set_frame_rate(16000)
+                    logger.info('已转换采样率到16kHz')
+                
+                # 保存为WAV格式
+                wav_path = os.path.join(voice_temp_dir, 'temp_audio.wav')
+                audio.export(wav_path, format='wav', parameters=["-acodec", "pcm_s16le"])
+                logger.info(f'已保存为WAV格式: {wav_path}')
+                
+                # 读取WAV文件并发送数据
+                with wave.open(wav_path, 'rb') as wf:
+                    logger.info(f'WAV文件信息: 通道数={wf.getnchannels()}, 采样率={wf.getframerate()}, 帧数={wf.getnframes()}')
+                    
+                    # 创建回调对象
+                    callback = ASRCallback()
+                    
+                    # 初始化识别器
+                    translator = TranslationRecognizerChat(
+                        model="gummy-chat-v1",
+                        format="pcm",
+                        sample_rate=16000,
+                        transcription_enabled=True,
+                        translation_enabled=False,
+                        callback=callback
+                    )
+                    
+                    # 开始识别
+                    translator.start()
+                    logger.info('开始发送音频数据')
+                    
+                    # 读取音频数据并发送
+                    chunk_size = 3200  # 200ms的数据
+                    total_chunks = 0
+                    while True:
+                        data = wf.readframes(chunk_size)
+                        if not data:
+                            break
+                        translator.send_audio_frame(data)
+                        total_chunks += 1
+                        # 每发送一块数据后稍微等待一下
+                        time.sleep(0.01)
+                    
+                    logger.info(f'发送完成，共发送 {total_chunks} 个数据块')
+                    
+                    # 停止识别并等待结果
+                    translator.stop()
+                    
+                    # 等待结果（最多等待30秒）
+                    wait_time = 0
+                    max_wait_time = 30  # 增加等待时间到30秒
+                    
+                    while wait_time < max_wait_time:
+                        if callback.is_finished:  # 移除 and callback.is_sentence_end 条件
+                            # 给一点额外时间等待最后的结果
+                            time.sleep(0.5)
+                            break
+                        time.sleep(0.1)
+                        wait_time += 0.1
+                    
+                    if wait_time >= max_wait_time:
+                        logger.warning('等待超时')
+                    
+                    # 检查是否有错误
+                    if callback.error:
+                        return JsonResponse({'error': f'语音识别错误: {callback.error}'}, status=500)
+                    
+                    # 获取最终识别结果
+                    if callback.final_text:
+                        logger.info(f'识别成功: {callback.final_text}')
+                        return JsonResponse({'text': callback.final_text})
+                    elif callback.all_text:  # 如果有任何中间结果，使用最后一个
+                        final_text = callback.all_text[-1]
+                        logger.info(f'使用最后的中间结果: {final_text}')
+                        return JsonResponse({'text': final_text})
+                    else:
+                        logger.error('没有得到识别结果')
+                        return JsonResponse({'error': '语音识别结果为空'}, status=500)
+                    
+            except Exception as api_error:
+                logger.error(f"API调用错误: {str(api_error)}")
+                return JsonResponse({'error': f'API调用错误: {str(api_error)}'}, status=500)
+            finally:
+                # 清理临时文件
+                try:
+                    if wav_path and os.path.exists(wav_path):
+                        os.remove(wav_path)
+                except Exception as e:
+                    logger.error(f"删除临时文件失败: {str(e)}")
+                
+        except Exception as e:
+            logger.error(f"处理语音请求时发生错误: {str(e)}")
+            return JsonResponse({'error': f'服务器错误: {str(e)}'}, status=500)
+    
+    return JsonResponse({'error': '不支持的请求方法'}, status=400)

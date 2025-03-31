@@ -36,7 +36,7 @@
       bottom: 10px;
       right: 10px;
     }
-    .container-md #newChatButton {
+    .container-md #microphoneButton {
       position: absolute;
       bottom: 100px;
       right: 10px;
@@ -241,7 +241,7 @@
       <textarea class="form-control input-area" id="userInput" placeholder="问我任何问题，按Shift+Enter换行" aria-label="用户输入"></textarea>
       <button class="btn btn-sm btn-primary" type="button" id="sendButton"><i class="fa-solid fa-microphone"></i></button>
 
-      <button class="btn btn-sm btn-primary" type="button" id="newChatButton">New Chat</button>
+      <button class="btn btn-sm btn-primary" type="button" id="microphoneButton"><i class="fa-solid fa-microphone"></i></button>
     </div>
   </div>
 {% endblock %}
@@ -457,6 +457,108 @@
             console.error("模型设置失败:", error);
           }
         });
+      });
+      
+      // 添加录音相关变量
+      let mediaRecorder;
+      let audioChunks = [];
+      let isRecording = false;
+      const microphoneButton = $('#microphoneButton');
+      
+      // 检查支持的音频格式
+      function getSupportedMimeType() {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          return 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          return 'audio/webm';
+        }
+        return 'audio/webm';  // 默认使用webm格式
+      }
+      
+      // 录音按钮点击事件
+      microphoneButton.on('click', async function() {
+        if (!isRecording) {
+          // 开始录音
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: 1,
+                    sampleRate: 16000,
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+            mediaRecorder = new MediaRecorder(stream, {
+              mimeType: getSupportedMimeType(),
+              audioBitsPerSecond: 16000
+            });
+            audioChunks = [];
+            
+            mediaRecorder.ondataavailable = (event) => {
+              audioChunks.push(event.data);
+            };
+            
+            mediaRecorder.onstop = async () => {
+              try {
+                // 使用webm格式发送
+                const audioBlob = new Blob(audioChunks, { type: getSupportedMimeType() });
+                const formData = new FormData();
+                formData.append('audio', audioBlob, 'audio.webm');  // 改为.webm扩展名
+                
+                // 显示加载提示
+                chatMessages.append(`
+                  <div class="typing-indicator">
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                  </div>
+                `);
+                
+                const response = await fetch('{% url "process_voice" %}', {
+                  method: 'POST',
+                  body: formData
+                });
+                
+                // 移除加载提示
+                $('.typing-indicator').remove();
+                
+                if (!response.ok) {
+                  const errorData = await response.json();
+                  throw new Error(errorData.error || '语音识别失败');
+                }
+                
+                const data = await response.json();
+                if (data.text) {
+                  userInput.val(data.text);
+                  sendMessage();
+                } else {
+                  throw new Error('未获取到识别结果');
+                }
+              } catch (error) {
+                console.error('语音处理错误:', error);
+                alert(error.message || '语音识别失败，请重试');
+              } finally {
+                // 重置录音状态
+                audioChunks = [];
+              }
+            };
+            
+            mediaRecorder.start(1000);
+            isRecording = true;
+            microphoneButton.removeClass('btn-primary').addClass('btn-danger');
+            
+          } catch (error) {
+            console.error('录音权限错误:', error);
+            alert('无法访问麦克风，请确保已授予录音权限');
+          }
+        } else {
+          // 停止录音
+          mediaRecorder.stop();
+          mediaRecorder.stream.getTracks().forEach(track => track.stop());
+          isRecording = false;
+          microphoneButton.removeClass('btn-danger').addClass('btn-primary');
+        }
       });
     });
   </script>

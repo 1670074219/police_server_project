@@ -28,4 +28,6 @@ urlpatterns = [
     path('chat_page', chat.chat_page, name='chat_page'),
 
     path('agent_page', agent.agent_page, name='agent_page'),
+
+    path('api/process_voice', chat.process_voice, name='process_voice'),
 ]
