@@ -7,12 +7,23 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class RagFlowService:
-    def __init__(self, api_key, base_url=None, model_name="model", chat_id=None):
+    def __init__(self, api_key, base_url, model_name, chat_id):
         self.api_key = api_key
+        self.base_url = f"{base_url}/api/v1/chats_openai/{chat_id}"
         self.model_name = model_name
         self.chat_id = chat_id
-        self.base_url = None
-        self.client = None
+        
+        # 初始化 OpenAI 客户端，添加超时和重试设置
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=self.base_url,
+            timeout=120.0,  # 增加超时时间到120秒
+            max_retries=5,  # 增加重试次数
+            default_headers={
+                "Content-Type": "application/json",
+                "Connection": "keep-alive"
+            }
+        )
     
     def generate_response(self, prompt, system_prompt=None):
         """

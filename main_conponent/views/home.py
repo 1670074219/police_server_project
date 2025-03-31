@@ -58,27 +58,39 @@ def generate_response(message):
     try:
         yield 'retry: 1000\n\n'
         
-        response = dashscope.Generation.call(
-            model='qwen-max',
-            messages=[{"role": "user", "content": message}],
-            stream=True
-        )
-        
-        last_content = ""
+        try:
+            response = ragflow_service.client.chat.completions.create(
+                model=ragflow_service.model_name,
+                messages=[
+                    {"role": "system", "content": "你是一个有用的助手。"},
+                    {"role": "user", "content": message}
+                ],
+                stream=True,
+                timeout=120
+            )
+        except Exception as e:
+            logger.error(f"RagFlow服务连接错误: {str(e)}")
+            yield f"data: {json.dumps({'error': '服务连接超时，请重试'})}\n\n"
+            return
+
         current_sentence = ""
         
-        for chunk in response:
-            if chunk.status_code == 200:
-                if chunk.output and chunk.output.text:
-                    current_content = chunk.output.text
-                    # 获取新增的文本
-                    new_text = current_content[len(last_content):]
-                    if new_text:
-                        # 更新最后的内容
-                        last_content = current_content
-                        
+        def clean_text(text):
+            """清理文本，移除不可见字符和特殊字符"""
+            import re
+            # 保留中文、英文、数字、基本标点
+            text = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9，。！？,.!?、:：""'' ]', '', text)
+            # 移除多余的空白字符
+            text = ' '.join(text.split())
+            return text
+        
+        try:
+            for chunk in response:
+                if hasattr(chunk.choices[0].delta, 'content'):
+                    content = chunk.choices[0].delta.content
+                    if content:
                         # 处理新文本
-                        for char in new_text:
+                        for char in content:
                             current_sentence += char
                             # 发送字符到前端
                             yield f"data: {json.dumps({'content': char})}\n\n"
@@ -86,28 +98,33 @@ def generate_response(message):
                             # 检查是否句子结束
                             if char in ['。', '！', '？', '.', '!', '?']:
                                 try:
-                                    # 异步生成语音
-                                    audio_path = asyncio.run(tts_manager.synthesize_speech(current_sentence))
-                                    file_name = os.path.basename(audio_path)
-                                    # 发送语音文件路径
-                                    yield f"data: {json.dumps({'audio_path': file_name, 'text': current_sentence})}\n\n"
+                                    # 清理并检查句子
+                                    cleaned_sentence = clean_text(current_sentence)
+                                    if cleaned_sentence.strip():
+                                        # 异步生成语音
+                                        audio_path = asyncio.run(tts_manager.synthesize_speech(cleaned_sentence))
+                                        file_name = os.path.basename(audio_path)
+                                        # 发送语音文件路径
+                                        yield f"data: {json.dumps({'audio_path': file_name, 'text': cleaned_sentence})}\n\n"
                                     # 清空当前句子
                                     current_sentence = ""
                                 except Exception as e:
                                     logger.error(f"语音合成错误: {str(e)}")
                                     yield f"data: {json.dumps({'error': f'语音合成错误: {str(e)}'})}\n\n"
-            else:
-                error_msg = f'请求失败: {chunk.code}'
-                logger.error(error_msg)
-                yield f"data: {json.dumps({'error': error_msg})}\n\n"
-                return
+        except Exception as e:
+            logger.error(f"流式响应错误: {str(e)}")
+            yield f"data: {json.dumps({'error': '响应处理错误，请重试'})}\n\n"
+            return
         
         # 处理最后一个不完整的句子
         if current_sentence:
             try:
-                audio_path = asyncio.run(tts_manager.synthesize_speech(current_sentence))
-                file_name = os.path.basename(audio_path)
-                yield f"data: {json.dumps({'audio_path': file_name, 'text': current_sentence})}\n\n"
+                # 清理并检查最后的句子
+                cleaned_sentence = clean_text(current_sentence)
+                if cleaned_sentence.strip():
+                    audio_path = asyncio.run(tts_manager.synthesize_speech(cleaned_sentence))
+                    file_name = os.path.basename(audio_path)
+                    yield f"data: {json.dumps({'audio_path': file_name, 'text': cleaned_sentence})}\n\n"
             except Exception as e:
                 logger.error(f"语音合成错误: {str(e)}")
                 yield f"data: {json.dumps({'error': f'语音合成错误: {str(e)}'})}\n\n"
