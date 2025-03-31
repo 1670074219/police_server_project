@@ -1,11 +1,12 @@
 from django.shortcuts import HttpResponse, render
-from django.http import JsonResponse
+from django.http import JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 import json
 import logging
 import time
 from ..services.ragflow_service import RagFlowService
 from openai import OpenAI
+import dashscope
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -46,47 +47,53 @@ def set_model(request):
         return JsonResponse({'status': 'success'})
     return JsonResponse({'status': 'error', 'message': '只接受POST请求'}, status=405)
 
+def generate_response(message):
+    """生成流式响应"""
+    try:
+        # 发送心跳保持连接
+        yield 'retry: 1000\n\n'  # 重连间隔为1秒
+        
+        response = ragflow_service.client.chat.completions.create(
+            model=ragflow_service.model_name,
+            messages=[
+                {"role": "user", "content": message}
+            ],
+            stream=True
+        )
+        
+        for chunk in response:
+            if hasattr(chunk.choices[0].delta, 'content'):
+                content = chunk.choices[0].delta.content
+                if content:
+                    yield f"data: {json.dumps({'content': content})}\n\n"
+        
+        # 发送结束标记
+        yield "data: [DONE]\n\n"
+                    
+    except Exception as e:
+        logger.error(f"生成响应错误: {str(e)}")
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
 @csrf_exempt
 def chat_with_model(request):
     if request.method == 'POST':
-        start_time = time.time()
         try:
-            # 记录请求体
-            body = request.body.decode('utf-8')
-            logger.info(f"收到POST请求: {body}")
+            data = json.loads(request.body)
+            message = data.get('message', '')
             
-            data = json.loads(body)
-            user_message = data.get('message', '')
-            logger.info(f"用户消息: {user_message}")
+            # 返回流式响应
+            response = StreamingHttpResponse(
+                generate_response(message),
+                content_type='text/event-stream'
+            )
+            # 只保留必要的响应头
+            response['Cache-Control'] = 'no-cache'
+            response['X-Accel-Buffering'] = 'no'
+            # 移除 Connection 头部
+            return response
             
-            # 获取模型回复
-            logger.info("正在请求RagFlow模型回复...")
-            response = ragflow_service.generate_response(user_message)
-            
-            # 记录响应时间
-            elapsed_time = time.time() - start_time
-            logger.info(f"总处理时间: {elapsed_time:.2f}秒")
-            logger.info(f"模型回复: {response[:100]}...")
-            
-            return JsonResponse({
-                'status': 'success',
-                'response': response,
-                'elapsed_time': f"{elapsed_time:.2f}"
-            })
-        except json.JSONDecodeError as json_error:
-            error_msg = f"JSON解析错误: {str(json_error)}"
-            logger.error(error_msg)
-            return JsonResponse({
-                'status': 'error',
-                'message': error_msg
-            }, status=400)
         except Exception as e:
-            elapsed_time = time.time() - start_time
-            error_msg = f"处理请求时出错: {str(e)}"
-            logger.error(f"{error_msg}，总耗时: {elapsed_time:.2f}秒")
-            return JsonResponse({
-                'status': 'error',
-                'message': error_msg
-            }, status=500)
-    
-    return JsonResponse({'status': 'error', 'message': '只接受POST请求'}, status=405)
+            logger.error(f"处理请求错误: {str(e)}")
+            return JsonResponse({'error': str(e)}, status=500)
+            
+    return JsonResponse({'error': '不支持的请求方法'}, status=400)

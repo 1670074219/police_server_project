@@ -315,120 +315,90 @@
       scrollToBottom();
       
       // 发送消息函数
-      function sendMessage() {
+      async function sendMessage() {
         const message = userInput.val().trim();
         if (!message) return;
         
-        // 添加用户消息到聊天区域
+        // 添加用户消息
         chatMessages.append(`
-          <div class="user-message">
-            <div class="message-buttons">
-              <button class="copy-btn"><i class="fas fa-copy"></i> 复制</button>
-              <button class="speak-btn"><i class="fas fa-volume-up"></i> 播报</button>
-            </div>
-            ${message.replace(/\n/g, '<br>')}
-          </div>
-        `);
-        
-        // 清空输入框并重置高度
-        userInput.val('');
-        userInput.css('height', 'auto');
-        
-        // 移除旧的打字指示器（如果存在）
-        $('.typing-indicator').remove();
-        
-        // 添加新的打字指示器到最新消息后
-        chatMessages.append(`
-          <div class="typing-indicator">
-            <span class="dot"></span>
-            <span class="dot"></span>
-            <span class="dot"></span>
-          </div>
-        `);
-        
-        scrollToBottom();
-        
-        // 禁用输入和发送按钮
-        userInput.prop('disabled', true);
-        sendButton.prop('disabled', true);
-        
-        // 发送请求到后端
-        console.log("准备发送请求:", message);
-        $.ajax({
-          url: '{% url "chat_with_model" %}',
-          type: 'POST',
-          contentType: 'application/json',
-          data: JSON.stringify({ message: message }),
-          timeout: 180000,
-          success: function(data) {
-            // 移除打字指示器
-            $('.typing-indicator').remove();
-            
-            // 添加助手回复
-            let responseHtml = `
-              <div class="message assistant-message">
+            <div class="user-message">
                 <div class="message-buttons">
-                  <button class="copy-btn"><i class="fas fa-copy"></i></button>
-                  <button class="speak-btn"><i class="fas fa-volume-up"></i></button>
+                    <button class="copy-btn"><i class="fas fa-copy"></i></button>
+                    <button class="speak-btn"><i class="fas fa-volume-up"></i></button>
                 </div>
-                ${data.response.replace(/\n/g, '<br>')}`;
-                
-            // 如果有响应时间，显示它
-            if (data.elapsed_time) {
-              responseHtml += `
-                <div class="response-time">
-                  响应时间: ${data.elapsed_time}秒
-                </div>`;
-            }
-            
-            responseHtml += `</div>`;
-            chatMessages.append(responseHtml);
-            
-            // 启用输入和发送按钮
-            userInput.prop('disabled', false);
-            sendButton.prop('disabled', false);
-            userInput.focus();
-            
-            scrollToBottom();
-          },
-          error: function(xhr, status, error) {
-            console.error("AJAX错误详情:", {
-              status: status,
-              error: error,
-              responseText: xhr.responseText
+                ${message.replace(/\n/g, '<br>')}
+            </div>
+        `);
+
+        // 添加助手的消息容器
+        const assistantMessageDiv = $(`
+            <div class="assistant-message">
+                <div class="message-buttons">
+                    <button class="copy-btn"><i class="fas fa-copy"></i></button>
+                    <button class="speak-btn"><i class="fas fa-volume-up"></i></button>
+                </div>
+                <div class="message-content"></div>
+            </div>
+        `);
+        chatMessages.append(assistantMessageDiv);
+        
+        // 清空输入框并滚动到底部
+        userInput.val('');
+        scrollToBottom();
+
+        try {
+            const response = await fetch('{% url "chat_with_model" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message: message })
             });
-            // 移除打字指示器
-            $('.typing-indicator').remove();
-            
-            // 显示错误消息
-            let errorMessage = "发生未知错误";
-            
-            if (status === 'timeout') {
-              errorMessage = "请求超时，模型响应时间过长。请尝试更简短的问题或稍后再试。";
-            } else {
-              try {
-                const response = JSON.parse(xhr.responseText);
-                if (response && response.message) {
-                  errorMessage = response.message;
-                }
-              } catch (e) {
-                errorMessage = `请求失败: ${error || status}`;
-              }
+
+            if (!response.ok) {
+                throw new Error('网络响应错误');
             }
-            
-            chatMessages.append(`
-              <div class="message assistant-message" style="background-color: #ffdddd;">
-                <strong>错误:</strong> ${errorMessage}
-              </div>
-            `);
-            
-            // 启用输入和发送按钮
-            userInput.prop('disabled', false);
-            sendButton.prop('disabled', false);
-            
-            scrollToBottom();
-          }
-        });
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            const messageContent = assistantMessageDiv.find('.message-content');
+            let buffer = '';  // 用于存储未完成的数据
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';  // 保存最后一个不完整的行
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        if (data === '[DONE]') {
+                            // 处理结束标记
+                            break;
+                        }
+                        try {
+                            const parsed = JSON.parse(data);
+                            if (parsed.content) {
+                                messageContent.append(parsed.content);
+                                scrollToBottom();
+                            } else if (parsed.error) {
+                                messageContent.append(`<div class="error-message">${parsed.error}</div>`);
+                                scrollToBottom();
+                            }
+                        } catch (e) {
+                            console.error('解析数据错误:', e, data);
+                        }
+                    }
+                }
+            }
+
+        } catch (error) {
+            console.error('发送消息错误:', error);
+            assistantMessageDiv.html(`<div class="error-message">发送消息失败: ${error.message}</div>`);
+        }
       }
       
       // 侧边栏切换功能
