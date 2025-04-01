@@ -31,16 +31,12 @@
       font-size: 16px;   /* 调整字体大小 */
     }
 
-    .container-md #sendButton {
+    .container-md #microphoneButton {
       position: absolute;
       bottom: 10px;
       right: 10px;
     }
-    .container-md #microphoneButton {
-      position: absolute;
-      bottom: 100px;
-      right: 10px;
-    }
+
     .content-area {
       display: flex;
       flex-direction: column;
@@ -209,8 +205,10 @@
     .message-buttons {
       position: absolute;
       top: -20px;
-      right: 0;
+      left: 0;
       display: none;
+      margin: 0;
+      font-size: 0;
     }
     .user-message:hover .message-buttons,
     .assistant-message:hover .message-buttons {
@@ -218,12 +216,19 @@
     }
     .message-buttons button {
       padding: 2px 5px;
-      margin-left: 5px;
+      margin: 0;
       font-size: 12px;
       background-color: #fff;
       border: 1px solid #ddd;
-      border-radius: 3px;
       cursor: pointer;
+      display: inline-block;
+    }
+    .message-buttons button:first-child {
+      border-radius: 3px 0 0 3px;
+      border-right: none;
+    }
+    .message-buttons button:last-child {
+      border-radius: 0 3px 3px 0;
     }
     .message-buttons button:hover {
       background-color: #f8f9fa;
@@ -264,9 +269,8 @@
       </div>
       
       <textarea class="form-control input-area" id="userInput" placeholder="问我任何问题，按Shift+Enter换行" aria-label="用户输入"></textarea>
-      <button class="btn btn-sm btn-primary" type="button" id="sendButton"><i class="fa-solid fa-microphone"></i></button>
+      <button class="btn btn-sm btn-light" type="button" id="microphoneButton"><i class="fa-solid fa-microphone"></i></button>
 
-      <button class="btn btn-sm btn-primary" type="button" id="microphoneButton"><i class="fa-solid fa-microphone"></i></button>
     </div>
   </div>
 {% endblock %}
@@ -276,10 +280,9 @@
     $(document).ready(function() {
       const chatMessages = $('#chatMessages');
       const userInput = $('#userInput');
-      const sendButton = $('#sendButton');
-      const newChatButton = $('#newChatButton');
       const typingIndicator = $('#typingIndicator');
       const modelSelect = $('#modelSelect');
+      const microphoneButton = $('#microphoneButton');
       
       // 自动调整文本框高度
       userInput.on('input', function() {
@@ -293,17 +296,6 @@
           e.preventDefault();
           sendMessage();
         }
-      });
-      
-      // 发送按钮点击事件
-      sendButton.on('click', sendMessage);
-
-      // New Chat 按钮点击事件
-      newChatButton.on('click', function() {
-        // 清空聊天区域
-        chatMessages.empty();
-        // 添加初始欢迎消息
-        chatMessages.append('<div class="assistant-message">您好！我是基于RagFlow的智能助手，请问有什么可以帮助您的？</div>');
       });
         
       // 滚动到底部
@@ -499,7 +491,6 @@
       let mediaRecorder;
       let audioChunks = [];
       let isRecording = false;
-      const microphoneButton = $('#microphoneButton');
       
       // 检查支持的音频格式
       function getSupportedMimeType() {
@@ -582,7 +573,7 @@
             
             mediaRecorder.start(1000);
             isRecording = true;
-            microphoneButton.removeClass('btn-primary').addClass('btn-danger');
+            microphoneButton.removeClass('btn-light').addClass('btn-danger');
             
           } catch (error) {
             console.error('录音权限错误:', error);
@@ -593,7 +584,7 @@
           mediaRecorder.stop();
           mediaRecorder.stream.getTracks().forEach(track => track.stop());
           isRecording = false;
-          microphoneButton.removeClass('btn-danger').addClass('btn-primary');
+          microphoneButton.removeClass('btn-danger').addClass('btn-light');
         }
       });
 
