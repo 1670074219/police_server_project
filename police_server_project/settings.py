@@ -25,7 +25,15 @@ SECRET_KEY = 'django-insecure-9vw*5!3yw1juf2onvdy=$qy4(_%1)!zvow(=7a1cabc-q+zm5)
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+# 添加 HTTPS 设置
+SECURE_SSL_REDIRECT = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
+
+ALLOWED_HOSTS = [
+    '219.216.99.136'
+]
 
 
 # Application definition
@@ -37,7 +45,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'main_conponent.apps.MainConponentConfig'
+    'main_conponent.apps.MainConponentConfig',
+    'django_extensions',
 ]
 
 MIDDLEWARE = [

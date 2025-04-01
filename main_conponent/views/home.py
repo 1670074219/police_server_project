@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 # 初始化RagFlow服务
 # 这些配置应该从环境变量或配置文件中读取
-RAGFLOW_API_KEY = "ragflow-Q4NDg1OWU2MDQ4YTExZjBhYjQwMDI0Mm"  # 替换为实际的API密钥
-RAGFLOW_BASE_URL = "http://192.168.101.205:80"  # 替换为实际的RagFlow地址
-RAGFLOW_CHAT_ID = "0cca3740057e11f0b0320242ac120004"
-RAGFLOW_MODEL = "qwq-32b@Tongyi-Qianwen"
+RAGFLOW_API_KEY = "ragflow-BhYTBmYWUyMGVmOTExZjBiMDIzNmE4Yj"  # 替换为实际的API密钥
+RAGFLOW_BASE_URL = "http://219.216.99.136:6523"  # 替换为实际的RagFlow地址
+RAGFLOW_CHAT_ID = "6f2813840d6d11f0a4349e333fa9eae3"
+RAGFLOW_MODEL = "deepseek-v3@Tongyi-Qianwen"
 
 ragflow_service = RagFlowService(
     api_key=RAGFLOW_API_KEY,

@@ -15,15 +15,6 @@ import pyaudio
 import json
 from ..services.asr_service import ASRCallback
 
-# 设置 FFmpeg 路径
-ffmpeg_path = r"D:\Desktop\ffmpeg-master-latest-win64-gpl\bin"
-os.environ["PATH"] += os.pathsep + ffmpeg_path
-
-# 设置 pydub 的路径
-AudioSegment.converter = os.path.join(ffmpeg_path, "ffmpeg.exe")
-AudioSegment.ffmpeg = os.path.join(ffmpeg_path, "ffmpeg.exe")
-AudioSegment.ffprobe = os.path.join(ffmpeg_path, "ffprobe.exe")
-
 # 设置日志
 logger = logging.getLogger(__name__)
 
