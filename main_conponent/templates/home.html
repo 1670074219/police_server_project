@@ -31,7 +31,7 @@
     font-size: 16px;   /* 调整字体大小 */
   }
 
-  .container-md #sendButton {
+  .container-md #microphoneButton {
     position: absolute;
     bottom: 10px;
     right: 10px;
@@ -50,6 +50,7 @@
     border-radius: 10px;
   }
   .user-message {
+    position: relative;
     display: inline-block;
     margin-bottom: 15px;
     padding: 10px 15px;
@@ -61,6 +62,7 @@
     word-wrap: break-word;
   }
   .assistant-message {
+    position: relative;
     display: inline-block;
     margin-bottom: 15px;
     padding: 10px 15px;
@@ -108,6 +110,38 @@
     margin-top: 5px;
     text-align: right;
   }
+
+  .message-buttons {
+    position: absolute;
+    top: -20px;
+    left: 0;
+    display: none;
+    margin: 0;
+    font-size: 0;
+  }
+  .user-message:hover .message-buttons,
+  .assistant-message:hover .message-buttons {
+    display: block;
+  }
+  .message-buttons button {
+    padding: 2px 5px;
+    margin: 0;
+    font-size: 12px;
+    background-color: #fff;
+    border: 1px solid #ddd;
+    cursor: pointer;
+    display: inline-block;
+  }
+  .message-buttons button:first-child {
+    border-radius: 3px 0 0 3px;
+    border-right: none;
+  }
+  .message-buttons button:last-child {
+    border-radius: 0 3px 3px 0;
+  }
+  .message-buttons button:hover {
+    background-color: #f8f9fa;
+  }
 </style>
 {% endblock %}
 
@@ -127,7 +161,7 @@
       </div>
       
       <textarea class="form-control input-area" id="userInput" placeholder="问我任何问题，按Shift+Enter换行" aria-label="用户输入"></textarea>
-      <button class="btn btn-sm btn-light" type="button" id="sendButton"><i class="fa-solid fa-microphone"></i></button>
+      <button class="btn btn-sm btn-light" type="button" id="microphoneButton"><i class="fa-solid fa-microphone"></i></button>
     </div>
 </div>
 {% endblock %}
@@ -137,7 +171,7 @@
 $(document).ready(function() {
     const chatMessages = $('#chatMessages');
     const userInput = $('#userInput');
-    const sendButton = $('#sendButton');
+    const microphoneButton = $('#microphoneButton');
     const typingIndicator = $('#typingIndicator');
     
     // 自动调整文本框高度
@@ -154,9 +188,6 @@ $(document).ready(function() {
       }
     });
     
-    // 发送按钮点击事件
-    sendButton.on('click', sendMessage);
-    
     // 滚动到底部
     function scrollToBottom() {
       chatMessages.scrollTop(chatMessages[0].scrollHeight);
@@ -166,113 +197,315 @@ $(document).ready(function() {
     scrollToBottom();
     
     // 发送消息函数
-    function sendMessage() {
+    async function sendMessage() {
       const message = userInput.val().trim();
       if (!message) return;
       
-      // 添加用户消息到聊天区域
+      // 添加用户消息
       chatMessages.append(`
-        <div class="user-message">
-          ${message.replace(/\n/g, '<br>')}
-        </div>
+          <div class="user-message">
+              <div class="message-buttons">
+                  <button class="copy-btn"><i class="fas fa-copy"></i></button>
+                  <button class="speak-btn"><i class="fas fa-volume-up"></i></button>
+              </div>
+              ${message.replace(/\n/g, '<br>')}
+          </div>
       `);
+
+      // 添加助手的消息容器
+      const assistantMessageDiv = $(`
+          <div class="assistant-message">
+              <div class="message-buttons">
+                  <button class="copy-btn"><i class="fas fa-copy"></i></button>
+                  <button class="speak-btn"><i class="fas fa-volume-up"></i></button>
+              </div>
+              <div class="message-content"></div>
+          </div>
+      `);
+      chatMessages.append(assistantMessageDiv);
       
-      // 清空输入框并重置高度
+      // 清空输入框并滚动到底部
       userInput.val('');
-      userInput.css('height', 'auto');
-      
-      // 移除旧的打字指示器（如果存在）
-      $('.typing-indicator').remove();
-      
-      // 添加新的打字指示器到最新消息后
-      chatMessages.append(`
-        <div class="typing-indicator">
-          <span class="dot"></span>
-          <span class="dot"></span>
-          <span class="dot"></span>
-        </div>
-      `);
-      
       scrollToBottom();
-      
-      // 禁用输入和发送按钮
-      userInput.prop('disabled', true);
-      sendButton.prop('disabled', true);
-      
-      // 发送请求到后端
-      console.log("准备发送请求:", message);
-      $.ajax({
-        url: '{% url "chat_with_model" %}',
-        type: 'POST',
-        contentType: 'application/json',
-        data: JSON.stringify({ message: message }),
-        timeout: 180000,
-        success: function(data) {
-          // 移除打字指示器
-          $('.typing-indicator').remove();
-          
-          // 添加助手回复
-          let responseHtml = `
-            <div class="message assistant-message">
-              ${data.response.replace(/\n/g, '<br>')}`;
-              
-          // 如果有响应时间，显示它
-          if (data.elapsed_time) {
-            responseHtml += `
-              <div class="response-time">
-                响应时间: ${data.elapsed_time}秒
-              </div>`;
-          }
-          
-          responseHtml += `</div>`;
-          chatMessages.append(responseHtml);
-          
-          // 启用输入和发送按钮
-          userInput.prop('disabled', false);
-          sendButton.prop('disabled', false);
-          userInput.focus();
-          
-          scrollToBottom();
-        },
-        error: function(xhr, status, error) {
-          console.error("AJAX错误详情:", {
-            status: status,
-            error: error,
-            responseText: xhr.responseText
+
+      try {
+          const response = await fetch('{% url "chat_with_model" %}', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ message: message })
           });
-          // 移除打字指示器
-          $('.typing-indicator').remove();
-          
-          // 显示错误消息
-          let errorMessage = "发生未知错误";
-          
-          if (status === 'timeout') {
-            errorMessage = "请求超时，模型响应时间过长。请尝试更简短的问题或稍后再试。";
-          } else {
-            try {
-              const response = JSON.parse(xhr.responseText);
-              if (response && response.message) {
-                errorMessage = response.message;
+
+          if (!response.ok) {
+              throw new Error('网络响应错误');
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          const messageContent = assistantMessageDiv.find('.message-content');
+          let buffer = '';
+          let audioQueue = [];  // 音频队列
+          let isPlaying = false;  // 是否正在播放
+
+          // 播放音频队列的函数
+          async function playNextAudio() {
+              if (audioQueue.length > 0 && !isPlaying) {
+                  isPlaying = true;
+                  const audioPath = audioQueue.shift();
+                  const audio = new Audio(`/api/get_audio/${audioPath}`);
+                  
+                  audio.onended = () => {
+                      isPlaying = false;
+                      playNextAudio();  // 播放下一个
+                  };
+                  
+                  audio.onerror = () => {
+                      isPlaying = false;
+                      playNextAudio();  // 出错时也继续播放下一个
+                  };
+                  
+                  try {
+                      await audio.play();
+                  } catch (e) {
+                      console.error('播放音频失败:', e);
+                      isPlaying = false;
+                      playNextAudio();
+                  }
               }
-            } catch (e) {
-              errorMessage = `请求失败: ${error || status}`;
+          }
+
+          while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                  if (line.startsWith('data: ')) {
+                      const data = line.slice(6);
+                      if (data === '[DONE]') {
+                          break;
+                      }
+                      try {
+                          const parsed = JSON.parse(data);
+                          if (parsed.content) {
+                              messageContent.append(parsed.content);
+                              scrollToBottom();
+                          } else if (parsed.audio_path) {
+                              // 将音频文件添加到队列
+                              audioQueue.push(parsed.audio_path);
+                              // 尝试播放
+                              playNextAudio();
+                          } else if (parsed.error) {
+                              messageContent.append(`<div class="error-message">${parsed.error}</div>`);
+                              scrollToBottom();
+                          }
+                      } catch (e) {
+                          console.error('解析数据错误:', e, data);
+                      }
+                  }
+              }
+          }
+
+      } catch (error) {
+          console.error('发送消息错误:', error);
+          assistantMessageDiv.html(`<div class="error-message">发送消息失败: ${error.message}</div>`);
+      }
+    }
+
+    // 添加录音相关变量
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
+      
+    // 检查支持的音频格式
+    function getSupportedMimeType() {
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        return 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        return 'audio/webm';
+      }
+      return 'audio/webm';  // 默认使用webm格式
+    }
+      
+    // 录音按钮点击事件
+    microphoneButton.on('click', async function() {
+      if (!isRecording) {
+        // 开始录音
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                  channelCount: 1,
+                  sampleRate: 16000,
+                  echoCancellation: true,
+                  noiseSuppression: true,
+                  autoGainControl: true
+              }
+          });
+          mediaRecorder = new MediaRecorder(stream, {
+            mimeType: getSupportedMimeType(),
+            audioBitsPerSecond: 16000
+          });
+          audioChunks = [];
+          
+          mediaRecorder.ondataavailable = (event) => {
+            audioChunks.push(event.data);
+          };
+          
+          mediaRecorder.onstop = async () => {
+            try {
+              // 使用webm格式发送
+              const audioBlob = new Blob(audioChunks, { type: getSupportedMimeType() });
+              const formData = new FormData();
+              formData.append('audio', audioBlob, 'audio.webm');  // 改为.webm扩展名
+              
+              // 显示加载提示
+              chatMessages.append(`
+                <div class="typing-indicator">
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                </div>
+              `);
+              
+              const response = await fetch('{% url "process_voice" %}', {
+                method: 'POST',
+                body: formData
+              });
+              
+              // 移除加载提示
+              $('.typing-indicator').remove();
+              
+              if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || '语音识别失败');
+              }
+              
+              const data = await response.json();
+              if (data.text) {
+                userInput.val(data.text);
+                sendMessage();
+              } else {
+                throw new Error('未获取到识别结果');
+              }
+            } catch (error) {
+              console.error('语音处理错误:', error);
+              alert(error.message || '语音识别失败，请重试');
+            } finally {
+              // 重置录音状态
+              audioChunks = [];
             }
+          };
+          
+          mediaRecorder.start(1000);
+          isRecording = true;
+          microphoneButton.removeClass('btn-light').addClass('btn-danger');
+          
+        } catch (error) {
+          console.error('录音权限错误:', error);
+          alert('无法访问麦克风，请确保已授予录音权限');
+        }
+      } else {
+        // 停止录音
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        isRecording = false;
+        microphoneButton.removeClass('btn-danger').addClass('btn-light');
+      }
+    });
+
+    // 添加语音播放功能
+    $(document).on('click', '.speak-btn', async function() {
+      const messageDiv = $(this).closest('.user-message, .assistant-message');
+      let text;
+      
+      // 检查是否存在 .message-content
+      const messageContent = messageDiv.find('.message-content');
+      if (messageContent.length > 0) {
+          // 如果存在 .message-content，获取其文本内容（助手消息）
+          text = messageContent.text().trim();
+      } else {
+          // 否则获取整个消息 div 的文本内容（用户消息）
+          text = messageDiv.clone().children().remove().end().text().trim();
+      }
+      
+      if (!text) {
+          alert('没有找到可播放的文本内容');
+          return;
+      }
+      try {
+          // 显示加载状态
+          const speakBtn = $(this);
+          speakBtn.prop('disabled', true);
+          speakBtn.html('<i class="fas fa-spinner fa-spin"></i>');
+          
+          const response = await fetch('{% url "text_to_speech" %}', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ text: text })
+          });
+          
+          if (!response.ok) {
+              throw new Error('语音合成失败');
           }
           
-          chatMessages.append(`
-            <div class="message assistant-message" style="background-color: #ffdddd;">
-              <strong>错误:</strong> ${errorMessage}
-            </div>
-          `);
+          // 获取音频数据并播放
+          const audioBlob = await response.blob();
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
           
-          // 启用输入和发送按钮
-          userInput.prop('disabled', false);
-          sendButton.prop('disabled', false);
+          audio.onended = function() {
+              URL.revokeObjectURL(audioUrl);
+              speakBtn.prop('disabled', false);
+              speakBtn.html('<i class="fas fa-volume-up"></i>');
+          };
           
-          scrollToBottom();
+          audio.onerror = function() {
+              URL.revokeObjectURL(audioUrl);
+              speakBtn.prop('disabled', false);
+              speakBtn.html('<i class="fas fa-volume-up"></i>');
+              alert('音频播放失败');
+          };
+          
+          await audio.play();
+          
+      } catch (error) {
+          console.error('语音播放错误:', error);
+          alert('语音播放失败，请重试');
+          $(this).prop('disabled', false).html('<i class="fas fa-volume-up"></i>');
+      }
+    });
+    // 添加复制功能
+    $(document).on('click', '.copy-btn', function() {
+        const copyBtn = $(this);
+        const messageDiv = copyBtn.closest('.user-message, .assistant-message');
+        let text;
+        
+        // 检查是否存在 .message-content
+        const messageContent = messageDiv.find('.message-content');
+        if (messageContent.length > 0) {
+            // 如果存在 .message-content，获取其文本内容
+            text = messageContent.text().trim();
+        } else {
+            // 否则获取整个消息 div 的文本内容（用于用户消息）
+            text = messageDiv.clone().children().remove().end().text().trim();
         }
+        
+        navigator.clipboard.writeText(text).then(() => {
+            copyBtn.html('<i class="fas fa-check"></i>');
+            setTimeout(() => {
+                copyBtn.html('<i class="fas fa-copy"></i>');
+            }, 1000);
+        }).catch(function(err) {
+            console.error('复制失败:', err);
+            alert('复制失败，请重试');
+        });
       });
-    }
   });
 </script>
 {% endblock %}

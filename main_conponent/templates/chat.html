@@ -597,67 +597,92 @@
       // 添加语音播放功能
       $(document).on('click', '.speak-btn', async function() {
         const messageDiv = $(this).closest('.user-message, .assistant-message');
-        const text = messageDiv.clone().children().remove().end().text().trim();
+        let text;
+        
+        // 检查是否存在 .message-content
+        const messageContent = messageDiv.find('.message-content');
+        if (messageContent.length > 0) {
+            // 如果存在 .message-content，获取其文本内容（助手消息）
+            text = messageContent.text().trim();
+        } else {
+            // 否则获取整个消息 div 的文本内容（用户消息）
+            text = messageDiv.clone().children().remove().end().text().trim();
+        }
+        
+        if (!text) {
+            alert('没有找到可播放的文本内容');
+            return;
+        }
         
         try {
-          // 显示加载状态
-          const speakBtn = $(this);
-          speakBtn.prop('disabled', true);
-          speakBtn.html('<i class="fas fa-spinner fa-spin"></i>');
-          
-          const response = await fetch('{% url "text_to_speech" %}', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ text: text })
-          });
-          
-          if (!response.ok) {
-            throw new Error('语音合成失败');
-          }
-          
-          // 获取音频数据并播放
-          const audioBlob = await response.blob();
-          const audioUrl = URL.createObjectURL(audioBlob);
-          const audio = new Audio(audioUrl);
-          
-          audio.onended = function() {
-            URL.revokeObjectURL(audioUrl);
-            speakBtn.prop('disabled', false);
-            speakBtn.html('<i class="fas fa-volume-up"></i>');
-          };
-          
-          audio.onerror = function() {
-            URL.revokeObjectURL(audioUrl);
-            speakBtn.prop('disabled', false);
-            speakBtn.html('<i class="fas fa-volume-up"></i>');
-            alert('音频播放失败');
-          };
-          
-          await audio.play();
-          
+            // 显示加载状态
+            const speakBtn = $(this);
+            speakBtn.prop('disabled', true);
+            speakBtn.html('<i class="fas fa-spinner fa-spin"></i>');
+            
+            const response = await fetch('{% url "text_to_speech" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ text: text })
+            });
+            
+            if (!response.ok) {
+                throw new Error('语音合成失败');
+            }
+            
+            // 获取音频数据并播放
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            
+            audio.onended = function() {
+                URL.revokeObjectURL(audioUrl);
+                speakBtn.prop('disabled', false);
+                speakBtn.html('<i class="fas fa-volume-up"></i>');
+            };
+            
+            audio.onerror = function() {
+                URL.revokeObjectURL(audioUrl);
+                speakBtn.prop('disabled', false);
+                speakBtn.html('<i class="fas fa-volume-up"></i>');
+                alert('音频播放失败');
+            };
+            
+            await audio.play();
+            
         } catch (error) {
-          console.error('语音播放错误:', error);
-          alert('语音播放失败，请重试');
-          $(this).prop('disabled', false).html('<i class="fas fa-volume-up"></i>');
+            console.error('语音播放错误:', error);
+            alert('语音播放失败，请重试');
+            $(this).prop('disabled', false).html('<i class="fas fa-volume-up"></i>');
         }
       });
 
       // 添加复制功能
       $(document).on('click', '.copy-btn', function() {
-        const messageDiv = $(this).closest('.user-message, .assistant-message');
-        const text = messageDiv.clone().children().remove().end().text().trim();
+        const copyBtn = $(this);
+        const messageDiv = copyBtn.closest('.user-message, .assistant-message');
+        let text;
         
-        navigator.clipboard.writeText(text).then(function() {
-          const copyBtn = $(this);
-          copyBtn.html('<i class="fas fa-check"></i>');
-          setTimeout(() => {
-            copyBtn.html('<i class="fas fa-copy"></i>');
-          }, 1000);
+        // 检查是否存在 .message-content
+        const messageContent = messageDiv.find('.message-content');
+        if (messageContent.length > 0) {
+            // 如果存在 .message-content，获取其文本内容
+            text = messageContent.text().trim();
+        } else {
+            // 否则获取整个消息 div 的文本内容（用于用户消息）
+            text = messageDiv.clone().children().remove().end().text().trim();
+        }
+        
+        navigator.clipboard.writeText(text).then(() => {
+            copyBtn.html('<i class="fas fa-check"></i>');
+            setTimeout(() => {
+                copyBtn.html('<i class="fas fa-copy"></i>');
+            }, 1000);
         }).catch(function(err) {
-          console.error('复制失败:', err);
-          alert('复制失败，请重试');
+            console.error('复制失败:', err);
+            alert('复制失败，请重试');
         });
       });
     });

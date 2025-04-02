@@ -11,6 +11,7 @@ from ..services.tts_service import TTSManager
 import asyncio
 from asgiref.sync import sync_to_async
 import os
+import re
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -78,11 +79,19 @@ def generate_response(message):
         def clean_text(text):
             """清理文本，移除不可见字符和特殊字符"""
             import re
+            # 移除知识库引用格式 ##数字$$
+            text = re.sub(r'##\d+\$\$', '', text)
             # 保留中文、英文、数字、基本标点
             text = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9，。！？,.!?、:：""'' ]', '', text)
             # 移除多余的空白字符
             text = ' '.join(text.split())
             return text
+        
+        # 判断句子是否有效（不仅仅是数字或标点）
+        def is_valid_sentence(text):
+            # 移除数字和标点后检查是否还有内容
+            stripped = re.sub(r'[\d\s,.。，!！?？:：;；]', '', text)
+            return len(stripped) > 0
         
         try:
             for chunk in response:
@@ -100,7 +109,7 @@ def generate_response(message):
                                 try:
                                     # 清理并检查句子
                                     cleaned_sentence = clean_text(current_sentence)
-                                    if cleaned_sentence.strip():
+                                    if cleaned_sentence.strip() and is_valid_sentence(cleaned_sentence):
                                         # 异步生成语音
                                         audio_path = asyncio.run(tts_manager.synthesize_speech(cleaned_sentence))
                                         file_name = os.path.basename(audio_path)
@@ -121,7 +130,7 @@ def generate_response(message):
             try:
                 # 清理并检查最后的句子
                 cleaned_sentence = clean_text(current_sentence)
-                if cleaned_sentence.strip():
+                if cleaned_sentence.strip() and is_valid_sentence(cleaned_sentence):
                     audio_path = asyncio.run(tts_manager.synthesize_speech(cleaned_sentence))
                     file_name = os.path.basename(audio_path)
                     yield f"data: {json.dumps({'audio_path': file_name, 'text': cleaned_sentence})}\n\n"
