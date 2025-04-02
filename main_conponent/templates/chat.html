@@ -355,20 +355,23 @@
             const decoder = new TextDecoder();
             const messageContent = assistantMessageDiv.find('.message-content');
             let buffer = '';
+            
+            // 修改音频队列结构，存储对象而不是简单的路径
             let audioQueue = [];  // 音频队列
             let isPlaying = false;  // 是否正在播放
+            let sentenceIndex = 0;  // 句子索引，用于确保顺序
 
             // 播放音频队列的函数
             async function playNextAudio() {
                 if (audioQueue.length > 0 && !isPlaying) {
+                    // 按照索引排序
+                    audioQueue.sort((a, b) => a.index - b.index);
+                    
+                    // 获取队列中第一个元素
+                    const audioItem = audioQueue.shift();
                     isPlaying = true;
-                    const audioInfo = audioQueue.shift();
-                    const audioPath = audioInfo.path;
-                    const sentenceIndex = audioInfo.index;
                     
-                    console.log(`播放音频: ${sentenceIndex} - ${audioPath}`);
-                    
-                    const audio = new Audio(`/api/get_audio/${audioPath}`);
+                    const audio = new Audio(`/api/get_audio/${audioItem.path}`);
                     
                     audio.onended = () => {
                         isPlaying = false;
@@ -376,7 +379,7 @@
                     };
                     
                     audio.onerror = () => {
-                        console.error('音频播放错误');
+                        console.error('音频播放错误:', audioItem.path);
                         isPlaying = false;
                         playNextAudio();  // 出错时也继续播放下一个
                     };
@@ -411,16 +414,13 @@
                                 // 直接添加单个字符
                                 messageContent.append(parsed.content);
                                 scrollToBottom();
-                            } else if (parsed.audio_path && parsed.sentence_index !== undefined) {
-                                // 将音频文件添加到队列，包含句子索引
+                            } else if (parsed.audio_path) {
+                                // 将音频文件添加到队列，包含索引信息
                                 audioQueue.push({
                                     path: parsed.audio_path,
-                                    index: parsed.sentence_index
+                                    text: parsed.text,
+                                    index: sentenceIndex++  // 使用递增的索引确保顺序
                                 });
-                                
-                                // 按索引排序音频队列
-                                audioQueue.sort((a, b) => a.index - b.index);
-                                
                                 // 尝试播放
                                 playNextAudio();
                             } else if (parsed.error) {
