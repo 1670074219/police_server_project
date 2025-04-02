@@ -362,7 +362,12 @@
             async function playNextAudio() {
                 if (audioQueue.length > 0 && !isPlaying) {
                     isPlaying = true;
-                    const audioPath = audioQueue.shift();
+                    const audioInfo = audioQueue.shift();
+                    const audioPath = audioInfo.path;
+                    const sentenceIndex = audioInfo.index;
+                    
+                    console.log(`播放音频: ${sentenceIndex} - ${audioPath}`);
+                    
                     const audio = new Audio(`/api/get_audio/${audioPath}`);
                     
                     audio.onended = () => {
@@ -371,6 +376,7 @@
                     };
                     
                     audio.onerror = () => {
+                        console.error('音频播放错误');
                         isPlaying = false;
                         playNextAudio();  // 出错时也继续播放下一个
                     };
@@ -402,11 +408,19 @@
                         try {
                             const parsed = JSON.parse(data);
                             if (parsed.content) {
+                                // 直接添加单个字符
                                 messageContent.append(parsed.content);
                                 scrollToBottom();
-                            } else if (parsed.audio_path) {
-                                // 将音频文件添加到队列
-                                audioQueue.push(parsed.audio_path);
+                            } else if (parsed.audio_path && parsed.sentence_index !== undefined) {
+                                // 将音频文件添加到队列，包含句子索引
+                                audioQueue.push({
+                                    path: parsed.audio_path,
+                                    index: parsed.sentence_index
+                                });
+                                
+                                // 按索引排序音频队列
+                                audioQueue.sort((a, b) => a.index - b.index);
+                                
                                 // 尝试播放
                                 playNextAudio();
                             } else if (parsed.error) {

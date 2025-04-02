@@ -63,7 +63,6 @@ def generate_response(message):
             response = ragflow_service.client.chat.completions.create(
                 model=ragflow_service.model_name,
                 messages=[
-                    {"role": "system", "content": "你是一个有用的助手。"},
                     {"role": "user", "content": message}
                 ],
                 stream=True,
@@ -75,10 +74,10 @@ def generate_response(message):
             return
 
         current_sentence = ""
+        sentence_index = 0  # 添加句子索引计数器
         
         def clean_text(text):
             """清理文本，移除不可见字符和特殊字符"""
-            import re
             # 移除知识库引用格式 ##数字$$
             text = re.sub(r'##\d+\$\$', '', text)
             # 保留中文、英文、数字、基本标点
@@ -93,15 +92,19 @@ def generate_response(message):
             stripped = re.sub(r'[\d\s,.。，!！?？:：;；]', '', text)
             return len(stripped) > 0
         
+        # 创建一个后台任务队列来处理语音合成
+        speech_tasks = []  # 存储元组: (句子索引, 句子文本, 处理结果)
+        
         try:
             for chunk in response:
                 if hasattr(chunk.choices[0].delta, 'content'):
                     content = chunk.choices[0].delta.content
                     if content:
-                        # 处理新文本
+                        # 处理新文本，一个字符一个字符地发送
                         for char in content:
                             current_sentence += char
-                            # 发送字符到前端
+                            
+                            # 立即发送每个字符到前端
                             yield f"data: {json.dumps({'content': char})}\n\n"
                             
                             # 检查是否句子结束
@@ -110,16 +113,46 @@ def generate_response(message):
                                     # 清理并检查句子
                                     cleaned_sentence = clean_text(current_sentence)
                                     if cleaned_sentence.strip() and is_valid_sentence(cleaned_sentence):
-                                        # 异步生成语音
-                                        audio_path = asyncio.run(tts_manager.synthesize_speech(cleaned_sentence))
-                                        file_name = os.path.basename(audio_path)
-                                        # 发送语音文件路径
-                                        yield f"data: {json.dumps({'audio_path': file_name, 'text': cleaned_sentence})}\n\n"
+                                        # 创建一个后台任务来处理语音合成
+                                        current_index = sentence_index  # 保存当前句子的索引
+                                        sentence_index += 1  # 递增索引
+                                        
+                                        def process_speech(sentence, idx):
+                                            try:
+                                                audio_path = asyncio.run(tts_manager.synthesize_speech(sentence))
+                                                file_name = os.path.basename(audio_path)
+                                                return (idx, file_name)
+                                            except Exception as e:
+                                                logger.error(f"语音合成错误: {str(e)}")
+                                                return (idx, None)
+                                        
+                                        # 在后台处理语音合成
+                                        import threading
+                                        task = threading.Thread(
+                                            target=lambda: speech_tasks.append((current_index, cleaned_sentence, process_speech(cleaned_sentence, current_index)))
+                                        )
+                                        task.daemon = True
+                                        task.start()
+                                    
                                     # 清空当前句子
                                     current_sentence = ""
                                 except Exception as e:
                                     logger.error(f"语音合成错误: {str(e)}")
                                     yield f"data: {json.dumps({'error': f'语音合成错误: {str(e)}'})}\n\n"
+                
+                # 检查是否有完成的语音合成任务
+                completed_tasks = []
+                for i, (idx, sentence, result) in enumerate(speech_tasks):
+                    if result is not None:  # 任务已完成
+                        task_idx, file_name = result
+                        if file_name:  # 成功
+                            yield f"data: {json.dumps({'audio_path': file_name, 'text': sentence, 'sentence_index': task_idx})}\n\n"
+                        completed_tasks.append(i)
+                
+                # 移除已完成的任务
+                for i in sorted(completed_tasks, reverse=True):
+                    speech_tasks.pop(i)
+                    
         except Exception as e:
             logger.error(f"流式响应错误: {str(e)}")
             yield f"data: {json.dumps({'error': '响应处理错误，请重试'})}\n\n"
@@ -131,12 +164,30 @@ def generate_response(message):
                 # 清理并检查最后的句子
                 cleaned_sentence = clean_text(current_sentence)
                 if cleaned_sentence.strip() and is_valid_sentence(cleaned_sentence):
+                    current_index = sentence_index
                     audio_path = asyncio.run(tts_manager.synthesize_speech(cleaned_sentence))
                     file_name = os.path.basename(audio_path)
-                    yield f"data: {json.dumps({'audio_path': file_name, 'text': cleaned_sentence})}\n\n"
+                    yield f"data: {json.dumps({'audio_path': file_name, 'text': cleaned_sentence, 'sentence_index': current_index})}\n\n"
             except Exception as e:
                 logger.error(f"语音合成错误: {str(e)}")
                 yield f"data: {json.dumps({'error': f'语音合成错误: {str(e)}'})}\n\n"
+        
+        # 等待所有语音合成任务完成
+        while speech_tasks:
+            completed_tasks = []
+            for i, (idx, sentence, result) in enumerate(speech_tasks):
+                if result is not None:  # 任务已完成
+                    task_idx, file_name = result
+                    if file_name:  # 成功
+                        yield f"data: {json.dumps({'audio_path': file_name, 'text': sentence, 'sentence_index': task_idx})}\n\n"
+                    completed_tasks.append(i)
+            
+            # 移除已完成的任务
+            for i in sorted(completed_tasks, reverse=True):
+                speech_tasks.pop(i)
+            
+            if speech_tasks:  # 如果还有未完成的任务，等待一下
+                time.sleep(0.1)
         
         yield "data: [DONE]\n\n"
                     
