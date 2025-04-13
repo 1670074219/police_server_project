@@ -31,7 +31,6 @@ ragflow_service = RagFlowService(
     chat_id=RAGFLOW_CHAT_ID
 )
 
-
 model = "cosyvoice-v1"
 voice = "longxiaochun"
 dashscope.api_key = "sk-d7b419aabe41461a99febae96b60b030"
@@ -88,87 +87,170 @@ def generate_response(message):
 
     current_sentence = ""
     sentence_index = 0  
-    speech_tasks = []  
 
+    logger.info("开始生成响应流")
     yield 'retry: 1000\n\n'
     
-    response = ragflow_service.client.chat.completions.create(
-        model=ragflow_service.model_name,
-        messages=[
-            {"role": "user", "content": message}
-        ],
-        stream=True,
-        timeout=120
-    )
-
-
-    for chunk in response:
-        content = chunk.choices[0].delta.content
-
-        if not content:
-            continue
-
-        synthesizer.streaming_call(content)
-        time.sleep(0.1)
-
-
-        for char in content:
-            current_sentence += char
+    # 提前创建一个新的TTS回调和合成器
+    class SimpleCallback(ResultCallback):
+        def __init__(self):
+            self.audio_chunks = []
+            self.current_index = 0
+            self.is_completed = False
+            self.is_error = False
+            self.error_message = None
             
-            yield f"data: {json.dumps({'content': char})}\n\n"
+        def on_open(self):
+            logger.info("TTS连接已打开")
             
-    
-            # if char in ['。', '！', '？', '.', '!', '?']:
-            #     cleaned_sentence = clean_text(current_sentence)
-            #     if cleaned_sentence.strip() and is_valid_sentence(cleaned_sentence):
-            #         current_index = sentence_index  
-            #         sentence_index += 1  
-
-            #         task = threading.Thread(
-            #             target=lambda: speech_tasks.append((current_index, cleaned_sentence, process_speech(cleaned_sentence, current_index)))
-            #         )
-            #         task.daemon = True
-            #         task.start()
+        def on_complete(self):
+            logger.info("TTS合成任务已完成")
+            self.is_completed = True
+            
+        def on_error(self, message: str):
+            logger.error(f"TTS合成错误: {message}")
+            self.is_error = True
+            self.error_message = message
+            
+        def on_close(self):
+            logger.info("TTS连接已关闭")
+            
+        def on_event(self, message):
+            logger.info(f"TTS事件: {message}")
+            
+        def on_data(self, data: bytes) -> None:
+            try:
+                import base64
+                encoded_data = base64.b64encode(data).decode('utf-8')
                 
-            #     current_sentence = ""
-
-        # completed_tasks = []
-        # for i, (idx, sentence, result) in enumerate(speech_tasks):
-        #     if result is not None:  
-        #         task_idx, file_name = result
-        #         if file_name: 
-        #             yield f"data: {json.dumps({'audio_path': file_name, 'text': sentence, 'sentence_index': task_idx})}\n\n"
-        #         completed_tasks.append(i)
-
-        # for i in sorted(completed_tasks, reverse=True):
-        #     speech_tasks.pop(i)
-    synthesizer.streaming_complete()
+                # 生成唯一的chunk ID
+                chunk_id = self.current_index
+                self.current_index += 1
                 
-    # if current_sentence:
-    #     cleaned_sentence = clean_text(current_sentence)
-    #     if cleaned_sentence.strip() and is_valid_sentence(cleaned_sentence):
-    #         current_index = sentence_index
-    #         audio_path = asyncio.run(tts_manager.synthesize_speech(cleaned_sentence))
-    #         file_name = os.path.basename(audio_path)
-    #         yield f"data: {json.dumps({'audio_path': file_name, 'text': cleaned_sentence, 'sentence_index': current_index})}\n\n"
+                logger.info(f"收到音频数据: {len(data)}字节, chunk_id: {chunk_id}")
+                
+                # 创建音频数据JSON
+                audio_json = json.dumps({
+                    'audio_data': encoded_data,
+                    'chunk_id': chunk_id,
+                    'sample_rate': 22050,
+                    'format': 'pcm'
+                })
+                
+                # 添加到音频块列表
+                self.audio_chunks.append(f"data: {audio_json}\n\n")
+                
+            except Exception as e:
+                logger.error(f"处理音频数据时出错: {str(e)}")
     
-    # 等待所有语音合成任务完成
-    # while speech_tasks:
-    #     completed_tasks = []
-    #     for i, (idx, sentence, result) in enumerate(speech_tasks):
-    #         if result is not None:  # 任务已完成
-    #             task_idx, file_name = result
-    #             if file_name:  # 成功
-    #                 yield f"data: {json.dumps({'audio_path': file_name, 'text': sentence, 'sentence_index': task_idx})}\n\n"
-    #             completed_tasks.append(i)
+    try:
+        logger.info(f"创建RagFlow请求，模型: {ragflow_service.model_name}")
+        response = ragflow_service.client.chat.completions.create(
+            model=ragflow_service.model_name,
+            messages=[
+                {"role": "user", "content": message}
+            ],
+            stream=True,
+            timeout=120
+        )
+        logger.info("RagFlow请求创建成功")
         
-    #     # 移除已完成的任务
-    #     for i in sorted(completed_tasks, reverse=True):
-    #         speech_tasks.pop(i)
+        accumulated_text = ""  # 用于累积文本
+        callback = SimpleCallback()
+        tts_engine = None
         
-    #     if speech_tasks:  # 如果还有未完成的任务，等待一下
-    #         time.sleep(0.1)
+        for chunk in response:
+            content = chunk.choices[0].delta.content
+            
+            if not content:
+                continue
+                
+            logger.info(f"收到文本内容: '{content}'")
+            accumulated_text += content
+            
+            # 将文本发送到前端
+            for char in content:
+                current_sentence += char
+                yield f"data: {json.dumps({'content': char})}\n\n"
+            
+            # 每次处理完文本块就合成并发送音频
+            if accumulated_text:
+                # 只在需要时创建TTS引擎
+                if tts_engine is None:
+                    try:
+                        logger.info("创建新的TTS合成器")
+                        tts_engine = SpeechSynthesizer(
+                            model=model,
+                            voice=voice,
+                            format=AudioFormat.PCM_22050HZ_MONO_16BIT,
+                            callback=callback
+                        )
+                        logger.info("TTS合成器创建成功")
+                    except Exception as e:
+                        logger.error(f"创建TTS合成器失败: {str(e)}")
+                        yield f"data: {json.dumps({'error': f'创建TTS合成器失败: {str(e)}'})}\n\n"
+                        # 继续处理文本，但不再尝试音频合成
+                        tts_engine = None
+                        accumulated_text = ""
+                        continue
+                
+                try:
+                    # 尝试合成当前文本块
+                    logger.info(f"开始合成文本: '{accumulated_text}'")
+                    tts_engine.streaming_call(accumulated_text)
+                    accumulated_text = ""  # 重置文本缓冲区
+                    
+                    # 短暂等待音频数据
+                    wait_count = 0
+                    while len(callback.audio_chunks) == 0 and wait_count < 10 and not callback.is_error and not callback.is_completed:
+                        time.sleep(0.1)
+                        wait_count += 1
+                    
+                    if callback.is_error:
+                        logger.error(f"TTS合成出错: {callback.error_message}")
+                        yield f"data: {json.dumps({'error': f'音频合成错误: {callback.error_message}'})}\n\n"
+                        # 重置错误状态
+                        callback.is_error = False
+                        callback.error_message = None
+                    
+                    # 发送所有可用的音频数据
+                    if callback.audio_chunks:
+                        logger.info(f"发送 {len(callback.audio_chunks)} 个音频块")
+                        for audio_response in callback.audio_chunks:
+                            yield audio_response
+                        callback.audio_chunks = []  # 清空已发送的数据
+                        
+                except Exception as e:
+                    logger.error(f"TTS合成或发送数据时出错: {str(e)}")
+                    yield f"data: {json.dumps({'error': f'音频合成处理错误: {str(e)}'})}\n\n"
+                    accumulated_text = ""  # 重置文本缓冲区
+        
+        # 完成TTS流式合成
+        if tts_engine is not None:
+            try:
+                logger.info("完成TTS流式合成")
+                tts_engine.streaming_complete()
+                
+                # 等待最后的音频数据
+                wait_count = 0
+                while not callback.is_completed and wait_count < 20 and not callback.is_error:
+                    time.sleep(0.1)
+                    wait_count += 1
+                
+                # 发送剩余的音频数据
+                if callback.audio_chunks:
+                    logger.info(f"发送剩余的 {len(callback.audio_chunks)} 个音频块")
+                    for audio_response in callback.audio_chunks:
+                        yield audio_response
+            except Exception as e:
+                logger.error(f"完成TTS流式合成时出错: {str(e)}")
+                yield f"data: {json.dumps({'error': f'完成音频合成时出错: {str(e)}'})}\n\n"
+        
+    except Exception as e:
+        logger.error(f"生成响应时出错: {str(e)}")
+        yield f"data: {json.dumps({'error': f'生成响应时出错: {str(e)}'})}\n\n"
     
+    logger.info("响应生成完成，发送[DONE]标记")
     yield "data: [DONE]\n\n"
 
 @csrf_exempt
