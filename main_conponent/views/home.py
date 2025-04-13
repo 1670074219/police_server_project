@@ -11,7 +11,6 @@ import threading
 from ..services.tts_service import TTSManager
 from ..services.ragflow_service import RagFlowService
 from openai import OpenAI
-from ..services.tts_service2 import synthesizer
 import dashscope
 from dashscope.audio.tts_v2 import *
 
@@ -82,176 +81,132 @@ def process_speech(sentence, idx):
         logger.error(f"语音合成错误: {str(e)}")
         return (idx, None)
 
+class Callback(ResultCallback):
+    def __init__(self):
+        self.audio_chunks = []
+        self.current_index = 0
+        self.is_completed = False
+        self.is_error = False
+        self.error_message = None
+        
+    def on_open(self):
+        logger.info("TTS连接已打开")
+        
+    def on_complete(self):
+        logger.info("TTS合成任务已完成")
+        self.is_completed = True
+        
+    def on_error(self, message: str):
+        logger.error(f"TTS合成错误: {message}")
+        self.is_error = True
+        self.error_message = message
+        
+    def on_close(self):
+        logger.info("TTS连接已关闭")
+        
+    def on_event(self, message):
+        logger.info(f"TTS事件: {message}")
+        
+    def on_data(self, data: bytes) -> None:
+        try:
+            import base64
+            encoded_data = base64.b64encode(data).decode('utf-8')
+            
+            # 生成唯一的chunk ID
+            chunk_id = self.current_index
+            self.current_index += 1
+            
+            logger.info(f"收到音频数据: {len(data)}字节, chunk_id: {chunk_id}")
+            
+            # 创建音频数据JSON
+            audio_json = json.dumps({
+                'audio_data': encoded_data,
+                'chunk_id': chunk_id,
+                'sample_rate': 16000,
+                'format': 'pcm'
+            })
+            
+            # 添加到音频块列表
+            self.audio_chunks.append(f"data: {audio_json}\n\n")   
+        except Exception as e:
+            logger.error(f"处理音频数据时出错: {str(e)}")
+
 def generate_response(message):
     """生成流式响应"""
-
-    current_sentence = ""
-    sentence_index = 0  
-
-    logger.info("开始生成响应流")
     yield 'retry: 1000\n\n'
     
-    # 提前创建一个新的TTS回调和合成器
-    class SimpleCallback(ResultCallback):
-        def __init__(self):
-            self.audio_chunks = []
-            self.current_index = 0
-            self.is_completed = False
-            self.is_error = False
-            self.error_message = None
-            
-        def on_open(self):
-            logger.info("TTS连接已打开")
-            
-        def on_complete(self):
-            logger.info("TTS合成任务已完成")
-            self.is_completed = True
-            
-        def on_error(self, message: str):
-            logger.error(f"TTS合成错误: {message}")
-            self.is_error = True
-            self.error_message = message
-            
-        def on_close(self):
-            logger.info("TTS连接已关闭")
-            
-        def on_event(self, message):
-            logger.info(f"TTS事件: {message}")
-            
-        def on_data(self, data: bytes) -> None:
-            try:
-                import base64
-                encoded_data = base64.b64encode(data).decode('utf-8')
-                
-                # 生成唯一的chunk ID
-                chunk_id = self.current_index
-                self.current_index += 1
-                
-                logger.info(f"收到音频数据: {len(data)}字节, chunk_id: {chunk_id}")
-                
-                # 创建音频数据JSON
-                audio_json = json.dumps({
-                    'audio_data': encoded_data,
-                    'chunk_id': chunk_id,
-                    'sample_rate': 22050,
-                    'format': 'pcm'
-                })
-                
-                # 添加到音频块列表
-                self.audio_chunks.append(f"data: {audio_json}\n\n")
-                
-            except Exception as e:
-                logger.error(f"处理音频数据时出错: {str(e)}")
-    
     try:
-        logger.info(f"创建RagFlow请求，模型: {ragflow_service.model_name}")
         response = ragflow_service.client.chat.completions.create(
             model=ragflow_service.model_name,
-            messages=[
-                {"role": "user", "content": message}
-            ],
+            messages=[{"role": "user", "content": message}],
             stream=True,
             timeout=120
         )
-        logger.info("RagFlow请求创建成功")
         
-        accumulated_text = ""  # 用于累积文本
-        callback = SimpleCallback()
-        tts_engine = None
+        callback = Callback()
+        synthesizer = SpeechSynthesizer(
+            model=model,
+            voice=voice,
+            format=AudioFormat.PCM_16000HZ_MONO_16BIT,  # 改为16000Hz
+            callback=callback
+        )
         
         for chunk in response:
             content = chunk.choices[0].delta.content
-            
             if not content:
                 continue
                 
             logger.info(f"收到文本内容: '{content}'")
-            accumulated_text += content
             
-            # 将文本发送到前端
+            # 发送文本
             for char in content:
-                current_sentence += char
                 yield f"data: {json.dumps({'content': char})}\n\n"
             
-            # 每次处理完文本块就合成并发送音频
-            if accumulated_text:
-                # 只在需要时创建TTS引擎
-                if tts_engine is None:
-                    try:
-                        logger.info("创建新的TTS合成器")
-                        tts_engine = SpeechSynthesizer(
-                            model=model,
-                            voice=voice,
-                            format=AudioFormat.PCM_22050HZ_MONO_16BIT,
-                            callback=callback
-                        )
-                        logger.info("TTS合成器创建成功")
-                    except Exception as e:
-                        logger.error(f"创建TTS合成器失败: {str(e)}")
-                        yield f"data: {json.dumps({'error': f'创建TTS合成器失败: {str(e)}'})}\n\n"
-                        # 继续处理文本，但不再尝试音频合成
-                        tts_engine = None
-                        accumulated_text = ""
-                        continue
-                
-                try:
-                    # 尝试合成当前文本块
-                    logger.info(f"开始合成文本: '{accumulated_text}'")
-                    tts_engine.streaming_call(accumulated_text)
-                    accumulated_text = ""  # 重置文本缓冲区
-                    
-                    # 短暂等待音频数据
-                    wait_count = 0
-                    while len(callback.audio_chunks) == 0 and wait_count < 10 and not callback.is_error and not callback.is_completed:
-                        time.sleep(0.1)
-                        wait_count += 1
-                    
-                    if callback.is_error:
-                        logger.error(f"TTS合成出错: {callback.error_message}")
-                        yield f"data: {json.dumps({'error': f'音频合成错误: {callback.error_message}'})}\n\n"
-                        # 重置错误状态
-                        callback.is_error = False
-                        callback.error_message = None
-                    
-                    # 发送所有可用的音频数据
-                    if callback.audio_chunks:
-                        logger.info(f"发送 {len(callback.audio_chunks)} 个音频块")
-                        for audio_response in callback.audio_chunks:
-                            yield audio_response
-                        callback.audio_chunks = []  # 清空已发送的数据
-                        
-                except Exception as e:
-                    logger.error(f"TTS合成或发送数据时出错: {str(e)}")
-                    yield f"data: {json.dumps({'error': f'音频合成处理错误: {str(e)}'})}\n\n"
-                    accumulated_text = ""  # 重置文本缓冲区
-        
-        # 完成TTS流式合成
-        if tts_engine is not None:
+            # 发送语音
             try:
-                logger.info("完成TTS流式合成")
-                tts_engine.streaming_complete()
+                synthesizer.streaming_call(content)
                 
-                # 等待最后的音频数据
-                wait_count = 0
-                while not callback.is_completed and wait_count < 20 and not callback.is_error:
+                # 给TTS服务一些时间生成音频
+                await_time = 0
+                while len(callback.audio_chunks) == 0 and await_time < 1.0 and not callback.is_error:
                     time.sleep(0.1)
-                    wait_count += 1
+                    await_time += 0.1
                 
-                # 发送剩余的音频数据
+                # 发送可用的音频数据
                 if callback.audio_chunks:
-                    logger.info(f"发送剩余的 {len(callback.audio_chunks)} 个音频块")
+                    logger.info(f"发送 {len(callback.audio_chunks)} 个音频块")
                     for audio_response in callback.audio_chunks:
                         yield audio_response
+                    callback.audio_chunks = []
             except Exception as e:
-                logger.error(f"完成TTS流式合成时出错: {str(e)}")
-                yield f"data: {json.dumps({'error': f'完成音频合成时出错: {str(e)}'})}\n\n"
+                logger.error(f"处理音频时出错: {str(e)}")
         
+        # 完成TTS流式合成
+        try:
+            logger.info("完成TTS流式合成")
+            synthesizer.streaming_complete()
+            
+            # 等待最后的音频数据
+            await_time = 0
+            while not callback.is_completed and await_time < 2.0 and not callback.is_error:
+                time.sleep(0.1)
+                await_time += 0.1
+            
+            # 发送剩余的音频数据
+            if callback.audio_chunks:
+                logger.info(f"发送剩余的 {len(callback.audio_chunks)} 个音频块")
+                for audio_response in callback.audio_chunks:
+                    yield audio_response
+        except Exception as e:
+            logger.error(f"完成音频合成时出错: {str(e)}")
+    
     except Exception as e:
         logger.error(f"生成响应时出错: {str(e)}")
-        yield f"data: {json.dumps({'error': f'生成响应时出错: {str(e)}'})}\n\n"
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
     
-    logger.info("响应生成完成，发送[DONE]标记")
-    yield "data: [DONE]\n\n"
+    finally:
+        logger.info("响应生成完成，发送[DONE]标记")
+        yield "data: [DONE]\n\n"
 
 @csrf_exempt
 def chat_with_model(request):

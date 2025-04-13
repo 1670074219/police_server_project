@@ -278,617 +278,525 @@
 {% block script %}
 <script>
     $(document).ready(function() {
-      console.log("[DEBUG] Document ready 函数已执行");
-      
-      try {
-          const chatMessages = $('#chatMessages');
-          const userInput = $('#userInput');
-          const typingIndicator = $('#typingIndicator');
-          const modelSelect = $('#modelSelect');
-          const microphoneButton = $('#microphoneButton');
-          
-          console.log("[DEBUG] DOM元素获取完成");
-          
-          // 确保Console中的错误可见
-          window.onerror = function(message, source, lineno, colno, error) {
-              console.error("[ERROR] 全局错误:", message, "位置:", source, lineno, colno);
-              if (error && error.stack) {
-                  console.error("[ERROR] 错误堆栈:", error.stack);
-              }
-              return false;
-          };
+        const chatMessages = $('#chatMessages');
+        const userInput = $('#userInput');
+        const modelSelect = $('#modelSelect');
+        const microphoneButton = $('#microphoneButton');
 
-          // 创建音频上下文 - 提前创建以允许用户交互激活
-          let audioContext;
-          try {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            console.log("[DEBUG] 音频上下文初始创建成功，状态:", audioContext.state);
-          } catch (error) {
-            console.error("[ERROR] 创建音频上下文失败:", error);
-            alert("创建音频上下文失败: " + error.message);
+        // 创建音频上下文 - 提前创建以允许用户交互激活
+        let audioContext;
+        try {
+          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          console.log("[DEBUG] 音频上下文初始创建成功，状态:", audioContext.state);
+        } catch (error) {
+          console.error("[ERROR] 创建音频上下文失败:", error);
+          alert("创建音频上下文失败: " + error.message);
+        }
+        
+        // 自动调整文本框高度
+        userInput.on('input', function() {
+          this.style.height = 'auto';
+          this.style.height = (this.scrollHeight) + 'px';
+        });
+        
+        // 处理Shift+Enter换行
+        userInput.on('keydown', function(e) {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
           }
+        });
           
-          // 自动调整文本框高度
-          userInput.on('input', function() {
-            console.log("[DEBUG] 输入框内容变化");
-            this.style.height = 'auto';
-            this.style.height = (this.scrollHeight) + 'px';
-          });
-          
-          // 处理Shift+Enter换行
-          userInput.on('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              console.log("[DEBUG] 按下Enter键，准备发送消息");
-              e.preventDefault();
-              sendMessage();
-            }
-          });
-            
-          // 滚动到底部
-          function scrollToBottom() {
-            chatMessages.scrollTop(chatMessages[0].scrollHeight);
-          }
-          
-          // 初始滚动到底部
-          scrollToBottom();
-          
-          // 发送消息函数
-          async function sendMessage() {
-              console.log("[DEBUG] 发送消息函数被调用");
-              
-              try {
-                  const message = userInput.val().trim();
-                  if (!message) return;
-                  
-                  console.log("[DEBUG] 准备发送消息:", message.substring(0, 30) + (message.length > 30 ? "..." : ""));
-                  
-                  // 添加用户消息
-                  chatMessages.append(`
-                      <div class="user-message">
-                          <div class="message-buttons">
-                              <button class="copy-btn"><i class="fas fa-copy"></i></button>
-                              <button class="speak-btn"><i class="fas fa-volume-up"></i></button>
-                          </div>
-                          ${message.replace(/\n/g, '<br>')}
-                      </div>
-                  `);
+        // 滚动到底部
+        function scrollToBottom() {
+          chatMessages.scrollTop(chatMessages[0].scrollHeight);
+        }
+        
+        // 初始滚动到底部
+        scrollToBottom();
+        
+        // 发送消息函数
+        async function sendMessage() {
+            const message = userInput.val().trim();
+            if (!message) return;
 
-                  // 添加助手的消息容器
-                  const assistantMessageDiv = $(`
-                      <div class="assistant-message">
-                          <div class="message-buttons">
-                              <button class="copy-btn"><i class="fas fa-copy"></i></button>
-                              <button class="speak-btn"><i class="fas fa-volume-up"></i></button>
-                          </div>
-                          <div class="message-content"></div>
-                      </div>
-                  `);
-                  chatMessages.append(assistantMessageDiv);
-                  
-                  // 清空输入框并滚动到底部
-                  userInput.val('');
-                  scrollToBottom();
-
-                  try {
-                      console.log("[DEBUG] 开始发送API请求");
-                      const response = await fetch('{% url "chat_with_model" %}', {
-                          method: 'POST',
-                          headers: {
-                              'Content-Type': 'application/json',
-                          },
-                          body: JSON.stringify({ message: message })
-                      });
-
-                      if (!response.ok) {
-                          console.error("[ERROR] 网络响应错误:", response.status, response.statusText);
-                          throw new Error('网络响应错误: ' + response.status);
-                      }
-
-                      console.log("[DEBUG] API请求成功，开始处理响应");
-                      const reader = response.body.getReader();
-                      const decoder = new TextDecoder();
-                      const messageContent = assistantMessageDiv.find('.message-content');
-                      let buffer = '';
-                      
-                      // Web Audio API 相关变量
-                      console.log("[DEBUG] 初始化Web Audio API...");
-
-                      // 重用已创建的音频上下文或创建新的
-                      if (!audioContext) {
-                          try {
-                              audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                              console.log("[DEBUG] 临时创建音频上下文成功，状态:", audioContext.state);
-                          } catch (error) {
-                              console.error("[ERROR] 临时创建音频上下文失败:", error);
-                              alert("无法创建音频播放环境: " + error.message);
-                          }
-                      }
-                      
-                      // 尝试激活音频上下文
-                      if (audioContext && audioContext.state === 'suspended') {
-                          try {
-                              await audioContext.resume();
-                              console.log("[DEBUG] 音频上下文已成功恢复");
-                          } catch (error) {
-                              console.error("[ERROR] 恢复音频上下文失败:", error);
-                              alert("请点击页面以允许音频播放");
-                          }
-                      }
-                      
-                      let audioQueue = [];  // 音频队列
-                      let isPlaying = false;  // 是否正在播放
-
-                      // 播放音频队列的函数 - 使用Web Audio API
-                      async function playNextAudio() {
-                          console.log("[DEBUG] 播放下一个音频被调用, 队列长度:", audioQueue.length, "是否正在播放:", isPlaying);
-                          
-                          if (!audioContext) {
-                              console.error("[ERROR] 音频上下文不可用，无法播放音频");
-                              return;
-                          }
-                          
-                          // 如果音频上下文被暂停，尝试恢复
-                          if (audioContext.state === 'suspended') {
-                              try {
-                                  await audioContext.resume();
-                                  console.log("[DEBUG] 音频上下文已恢复");
-                              } catch (error) {
-                                  console.error("[ERROR] 恢复音频上下文失败:", error);
-                                  alert("请点击页面以允许音频播放");
-                                  return;
-                              }
-                          }
-                          
-                          console.log("[DEBUG] 音频上下文状态:", audioContext.state);
-                          
-                          if (audioQueue.length > 0 && !isPlaying) {
-                              isPlaying = true;
-                              
-                              // 从队列中取出音频数据
-                              const audioData = audioQueue.shift();
-                              console.log("[DEBUG] 处理音频数据, chunk_id:", audioData.chunk_id);
-                              
-                              try {
-                                  console.log("[DEBUG] 解码base64音频数据...");
-                                  // 解码音频数据 - 使用更安全的方法
-                                  let audioArrayBuffer;
-                                  try {
-                                      const binaryString = atob(audioData.audio_data);
-                                      const bytes = new Uint8Array(binaryString.length);
-                                      for (let i = 0; i < binaryString.length; i++) {
-                                          bytes[i] = binaryString.charCodeAt(i);
-                                      }
-                                      audioArrayBuffer = bytes.buffer;
-                                      console.log("[DEBUG] Base64解码成功，音频数据长度:", audioArrayBuffer.byteLength, "字节");
-                                  } catch (e) {
-                                      console.error("[ERROR] Base64解码失败:", e);
-                                      isPlaying = false;
-                                      setTimeout(playNextAudio, 10); // 尝试下一个
-                                      return;
-                                  }
-                                  
-                                  // 将PCM数据转换为AudioBuffer
-                                  console.log("[DEBUG] 开始解码PCM数据，采样率:", audioData.sample_rate);
-                                  
-                                  try {
-                                      // 创建新的Float32Array来存储PCM数据
-                                      const pcmData = new Float32Array(audioArrayBuffer.byteLength / 2);
-                                      const dataView = new DataView(audioArrayBuffer);
-                                      
-                                      // 从Int16转换为Float32
-                                      for (let i = 0; i < pcmData.length; i++) {
-                                          pcmData[i] = dataView.getInt16(i * 2, true) / 32768.0;
-                                      }
-                                      
-                                      console.log("[DEBUG] PCM数据准备完成，长度:", pcmData.length);
-                                      
-                                      // 创建新的AudioBuffer
-                                      const audioBuffer = audioContext.createBuffer(1, pcmData.length, audioData.sample_rate);
-                                      audioBuffer.getChannelData(0).set(pcmData);
-                                      
-                                      console.log("[DEBUG] AudioBuffer创建成功");
-                                      
-                                      // 创建音频源并连接到输出
-                                      console.log("[DEBUG] 创建音频源...");
-                                      const source = audioContext.createBufferSource();
-                                      source.buffer = audioBuffer;
-                                      
-                                      // 添加增益节点，可以控制音量
-                                      const gainNode = audioContext.createGain();
-                                      gainNode.gain.value = 1.0; // 音量设置为1.0，可以根据需要调整
-                                      
-                                      // 连接节点: 音源 -> 增益 -> 目标(扬声器)
-                                      source.connect(gainNode);
-                                      gainNode.connect(audioContext.destination);
-                                      
-                                      // 播放结束后处理下一个
-                                      source.onended = () => {
-                                          console.log("[DEBUG] 音频播放结束");
-                                          isPlaying = false;
-                                          playNextAudio();
-                                      };
-                                      
-                                      // 开始播放
-                                      console.log("[DEBUG] 开始播放音频...");
-                                      source.start(0);
-                                      console.log("[DEBUG] 播放命令已发送");
-                                  } catch (e) {
-                                      console.error("[ERROR] AudioBuffer处理失败:", e);
-                                      isPlaying = false;
-                                      setTimeout(() => {
-                                          playNextAudio();
-                                      }, 100);
-                                  }
-                              } catch (e) {
-                                  console.error("[ERROR] 播放音频失败:", e);
-                                  isPlaying = false;
-                                  // 延迟一点时间再尝试下一个，避免连续失败造成死循环
-                                  setTimeout(() => {
-                                      playNextAudio();
-                                  }, 100);
-                              }
-                          } else {
-                              console.log("[DEBUG] 不满足播放条件或没有音频可播放");
-                          }
-                      }
-
-                      while (true) {
-                          console.log("[DEBUG] 读取响应数据...");
-                          const { value, done } = await reader.read();
-                          if (done) {
-                              console.log("[DEBUG] 响应读取完成");
-                              break;
-                          }
-
-                          buffer += decoder.decode(value, { stream: true });
-                          const lines = buffer.split('\n');
-                          buffer = lines.pop() || '';
-
-                          console.log("[DEBUG] 处理", lines.length, "行数据");
-                          for (const line of lines) {
-                              if (line.startsWith('data: ')) {
-                                  const data = line.slice(6);
-                                  if (data === '[DONE]') {
-                                      console.log("[DEBUG] 收到结束标记 [DONE]");
-                                      break;
-                                  }
-                                  try {
-                                      const parsed = JSON.parse(data);
-                                      console.log("[DEBUG] 解析的数据类型:", Object.keys(parsed));
-                                      
-                                      if (parsed.content) {
-                                          // 直接添加单个字符
-                                          messageContent.append(parsed.content);
-                                          scrollToBottom();
-                                      } else if (parsed.audio_data) {
-                                          // 收到音频数据，添加到队列
-                                          console.log("[DEBUG] 收到音频数据 chunk_id:", parsed.chunk_id, "数据长度:", parsed.audio_data.length);
-                                          
-                                          // 如果是第一个音频块，尝试开始播放
-                                          const shouldStartPlaying = audioQueue.length === 0 && !isPlaying;
-                                          
-                                          // 添加到队列
-                                          audioQueue.push(parsed);
-                                          
-                                          // 如果之前没有播放，立即开始播放
-                                          if (shouldStartPlaying) {
-                                              // 确保用户已经交互过以允许自动播放
-                                              if (audioContext && audioContext.state === 'suspended') {
-                                                  console.log("[DEBUG] 尝试恢复音频上下文...");
-                                                  try {
-                                                      await audioContext.resume();
-                                                      console.log("[DEBUG] 音频上下文已恢复");
-                                                  } catch (error) {
-                                                      console.error("[ERROR] 恢复音频上下文失败:", error);
-                                                      // 提示用户需要交互
-                                                      if (!document.querySelector('.audio-interaction-notice')) {
-                                                          messageContent.before(`
-                                                              <div class="audio-interaction-notice" style="color: #ff6b6b; margin-bottom: 10px; text-align: center; padding: 5px; background: #fff3f3; border-radius: 5px;">
-                                                                  请点击页面以允许语音播放
-                                                              </div>
-                                                          `);
-                                                          
-                                                          // 只需点击一次即可激活音频
-                                                          $(document).one('click', function() {
-                                                              $('.audio-interaction-notice').remove();
-                                                              if (audioContext && audioContext.state === 'suspended') {
-                                                                  audioContext.resume().then(() => {
-                                                                      console.log('[DEBUG] 通过用户交互恢复音频上下文');
-                                                                      playNextAudio();
-                                                                  });
-                                                              }
-                                                          });
-                                                      }
-                                                  }
-                                              }
-                                              console.log("[DEBUG] 调用playNextAudio开始播放");
-                                              playNextAudio();
-                                          }
-                                      } else if (parsed.error) {
-                                          console.error("[ERROR] 收到错误:", parsed.error);
-                                          messageContent.append(`<div class="error-message">${parsed.error}</div>`);
-                                          scrollToBottom();
-                                      }
-                                  } catch (e) {
-                                      console.error('[ERROR] 解析数据错误:', e, "数据:", data);
-                                  }
-                              }
-                          }
-                      }
-
-                  } catch (error) {
-                      console.error('[ERROR] 发送消息错误:', error);
-                      assistantMessageDiv.html(`<div class="error-message">发送消息失败: ${error.message}</div>`);
-                  }
-              } catch (error) {
-                  console.error("[ERROR] sendMessage函数出错:", error);
-                  alert("发送消息出错: " + error.message);
-              }
-          }
-          
-          // 侧边栏切换功能
-          $('#sidebarToggle').on('click', function() {
-            $('.sidebar').toggleClass('active');
-            $('.main-content').toggleClass('active');
-          });
-          
-          // 模型选择变化事件
-          modelSelect.on('change', function() {
-            const selectedModel = $(this).val();
-            if (selectedModel === "选择助手") return;
-            
-            // 清空聊天区域
-            chatMessages.empty();
-            
-            // 根据选择的助手显示不同的欢迎消息
-            let welcomeMessage = "您好！";
-            var ragflow_chat_id = null;
-            var ragflow_model = null;
-            switch(selectedModel) {
-              case "xiaozhi":
-                welcomeMessage += "我是小智，擅长初中物理";
-                ragflow_chat_id = "2150c87c0fca11f0bcd96a8b746c55e2";  
-                ragflow_model = "deepseek-r1:14b@Ollama ";
-                break;
-              case "xiaomei":
-                welcomeMessage += "我是小美，我会加入自己的总结。";
-                ragflow_chat_id = "6f2813840d6d11f0a4349e333fa9eae3";  
-                ragflow_model = "deepseek-v3@Tongyi-Qianwen";
-                break;
-              case "xiaoqiang":
-                welcomeMessage += "我是小强，擅长技术支持和编程指导。";
-                ragflow_chat_id = "6f2813840d6d11f0a4349e333fa9eae3";  
-                ragflow_model = "deepseek-v3@Tongyi-Qianwen";
-                break;
-              case "xiaoming":
-                welcomeMessage += "我是小明，擅长数据分析和逻辑推理。";
-                ragflow_chat_id = "6f2813840d6d11f0a4349e333fa9eae3";  
-                ragflow_model = "deepseek-v3@Tongyi-Qianwen";
-                break;
-              case "xiaoli":
-                welcomeMessage += "我是小李，擅长知识科普和学习辅导。";
-                ragflow_chat_id = "6f2813840d6d11f0a4349e333fa9eae3";  
-                ragflow_model = "deepseek-v3@Tongyi-Qianwen";
-                break;
-            }
-            
-            // 添加欢迎消息
+            // 添加用户消息
             chatMessages.append(`
-              <div class="assistant-message">
-                ${welcomeMessage}
-              </div>
+                <div class="user-message">
+                    <div class="message-buttons">
+                        <button class="copy-btn"><i class="fas fa-copy"></i></button>
+                        <button class="speak-btn"><i class="fas fa-volume-up"></i></button>
+                    </div>
+                    ${message.replace(/\n/g, '<br>')}
+                </div>
             `);
 
-            $.ajax({
-              url: '{% url "set_model" %}',
-              type: 'POST',
-              contentType: 'application/json',
-              data: JSON.stringify({ ragflow_chat_id: ragflow_chat_id, ragflow_model: ragflow_model }),
-              success: function(data) {
-                console.log("模型设置成功");
-              },
-              error: function(xhr, status, error) {
-                console.error("模型设置失败:", error);
-              }
-            });
-          });
-          
-          // 添加录音相关变量
-          let mediaRecorder;
-          let audioChunks = [];
-          let isRecording = false;
-          
-          // 检查支持的音频格式
-          function getSupportedMimeType() {
-            if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-              return 'audio/webm;codecs=opus';
-            } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-              return 'audio/webm';
-            }
-            return 'audio/webm';  // 默认使用webm格式
-          }
-          
-          // 录音按钮点击事件
-          microphoneButton.on('click', async function() {
-            if (!isRecording) {
-              // 开始录音
-              try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        channelCount: 1,
-                        sampleRate: 16000,
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
-                    }
-                });
-                mediaRecorder = new MediaRecorder(stream, {
-                  mimeType: getSupportedMimeType(),
-                  audioBitsPerSecond: 16000
-                });
-                audioChunks = [];
-                
-                mediaRecorder.ondataavailable = (event) => {
-                  audioChunks.push(event.data);
-                };
-                
-                mediaRecorder.onstop = async () => {
-                  try {
-                    // 使用webm格式发送
-                    const audioBlob = new Blob(audioChunks, { type: getSupportedMimeType() });
-                    const formData = new FormData();
-                    formData.append('audio', audioBlob, 'audio.webm');  // 改为.webm扩展名
-                    
-                    // 显示加载提示
-                    chatMessages.append(`
-                      <div class="typing-indicator">
-                        <span class="dot"></span>
-                        <span class="dot"></span>
-                        <span class="dot"></span>
-                      </div>
-                    `);
-                    
-                    const response = await fetch('{% url "process_voice" %}', {
-                      method: 'POST',
-                      body: formData
-                    });
-                    
-                    // 移除加载提示
-                    $('.typing-indicator').remove();
-                    
-                    if (!response.ok) {
-                      const errorData = await response.json();
-                      throw new Error(errorData.error || '语音识别失败');
-                    }
-                    
-                    const data = await response.json();
-                    if (data.text) {
-                      userInput.val(data.text);
-                      sendMessage();
-                    } else {
-                      throw new Error('未获取到识别结果');
-                    }
-                  } catch (error) {
-                    console.error('语音处理错误:', error);
-                    alert(error.message || '语音识别失败，请重试');
-                  } finally {
-                    // 重置录音状态
-                    audioChunks = [];
-                  }
-                };
-                
-                mediaRecorder.start(1000);
-                isRecording = true;
-                microphoneButton.removeClass('btn-light').addClass('btn-danger');
-                
-              } catch (error) {
-                console.error('录音权限错误:', error);
-                alert('无法访问麦克风，请确保已授予录音权限');
-              }
-            } else {
-              // 停止录音
-              mediaRecorder.stop();
-              mediaRecorder.stream.getTracks().forEach(track => track.stop());
-              isRecording = false;
-              microphoneButton.removeClass('btn-danger').addClass('btn-light');
-            }
-          });
+            // 添加助手的消息容器
+            const assistantMessageDiv = $(`
+                <div class="assistant-message">
+                    <div class="message-buttons">
+                        <button class="copy-btn"><i class="fas fa-copy"></i></button>
+                        <button class="speak-btn"><i class="fas fa-volume-up"></i></button>
+                    </div>
+                    <div class="message-content"></div>
+                </div>
+            `);
+            chatMessages.append(assistantMessageDiv);
+            
+            // 清空输入框并滚动到底部
+            userInput.val('');
+            scrollToBottom();
 
-          // 添加语音播放功能
-          $(document).on('click', '.speak-btn', async function() {
-            const messageDiv = $(this).closest('.user-message, .assistant-message');
-            let text;
-            
-            // 检查是否存在 .message-content
-            const messageContent = messageDiv.find('.message-content');
-            if (messageContent.length > 0) {
-                // 如果存在 .message-content，获取其文本内容（助手消息）
-                text = messageContent.text().trim();
-            } else {
-                // 否则获取整个消息 div 的文本内容（用户消息）
-                text = messageDiv.clone().children().remove().end().text().trim();
-            }
-            
-            if (!text) {
-                alert('没有找到可播放的文本内容');
-                return;
-            }
-            
             try {
-                // 显示加载状态
-                const speakBtn = $(this);
-                speakBtn.prop('disabled', true);
-                speakBtn.html('<i class="fas fa-spinner fa-spin"></i>');
-                
-                const response = await fetch('{% url "text_to_speech" %}', {
+                const response = await fetch('{% url "chat_with_model" %}', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ text: text })
+                    body: JSON.stringify({ message: message })
                 });
-                
+
                 if (!response.ok) {
-                    throw new Error('语音合成失败');
+                    console.error("[ERROR] 网络响应错误:", response.status, response.statusText);
+                    throw new Error('网络响应错误: ' + response.status);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                const messageContent = assistantMessageDiv.find('.message-content');
+                let buffer = '';
+                
+                // Web Audio API 相关变量
+                console.log("[DEBUG] 初始化Web Audio API...");
+                
+                // 尝试激活音频上下文
+                if (audioContext && audioContext.state === 'suspended') {
+                    try {
+                        await audioContext.resume();
+                        console.log("[DEBUG] 音频上下文已成功恢复");
+                    } catch (error) {
+                        console.error("[ERROR] 恢复音频上下文失败:", error);
+                        alert("请点击页面以允许音频播放");
+                    }
                 }
                 
-                // 获取音频数据并播放
-                const audioBlob = await response.blob();
-                const audioUrl = URL.createObjectURL(audioBlob);
-                const audio = new Audio(audioUrl);
-                
-                audio.onended = function() {
-                    URL.revokeObjectURL(audioUrl);
-                    speakBtn.prop('disabled', false);
-                    speakBtn.html('<i class="fas fa-volume-up"></i>');
-                };
-                
-                audio.onerror = function() {
-                    URL.revokeObjectURL(audioUrl);
-                    speakBtn.prop('disabled', false);
-                    speakBtn.html('<i class="fas fa-volume-up"></i>');
-                    alert('音频播放失败');
-                };
-                
-                await audio.play();
-                
-            } catch (error) {
-                console.error('语音播放错误:', error);
-                alert('语音播放失败，请重试');
-                $(this).prop('disabled', false).html('<i class="fas fa-volume-up"></i>');
-            }
-          });
+                let audioQueue = [];  // 音频队列
+                let isPlaying = false;  // 是否正在播放
 
-          // 添加复制功能
-          $(document).on('click', '.copy-btn', function() {
-            const copyBtn = $(this);
-            const messageDiv = copyBtn.closest('.user-message, .assistant-message');
-            let text;
-            
-            // 检查是否存在 .message-content
-            const messageContent = messageDiv.find('.message-content');
-            if (messageContent.length > 0) {
-                // 如果存在 .message-content，获取其文本内容
-                text = messageContent.text().trim();
-            } else {
-                // 否则获取整个消息 div 的文本内容（用于用户消息）
-                text = messageDiv.clone().children().remove().end().text().trim();
+                // 播放音频队列的函数 - 使用Web Audio API
+                async function playNextAudio() {
+                    console.log("[DEBUG] 播放下一个音频被调用, 队列长度:", audioQueue.length, "是否正在播放:", isPlaying);
+                    console.log("[DEBUG] 音频上下文状态:", audioContext.state);
+                    
+                    if (audioQueue.length > 0 && !isPlaying) {
+                        isPlaying = true;
+                        
+                        // 从队列中取出音频数据
+                        const audioData = audioQueue.shift();
+                        console.log("[DEBUG] 处理音频数据, chunk_id:", audioData.chunk_id);
+                        
+                        try {
+                            console.log("[DEBUG] 解码base64音频数据...");
+                            // 解码音频数据 - 使用更安全的方法
+                            let audioArrayBuffer;
+                            try {
+                                const binaryString = atob(audioData.audio_data);
+                                const bytes = new Uint8Array(binaryString.length);
+                                for (let i = 0; i < binaryString.length; i++) {
+                                    bytes[i] = binaryString.charCodeAt(i);
+                                }
+                                audioArrayBuffer = bytes.buffer;
+                                console.log("[DEBUG] Base64解码成功，音频数据长度:", audioArrayBuffer.byteLength, "字节");
+                            } catch (e) {
+                                console.error("[ERROR] Base64解码失败:", e);
+                                isPlaying = false;
+                                setTimeout(playNextAudio, 10); // 尝试下一个
+                                return;
+                            }
+                            
+                            // 将PCM数据转换为AudioBuffer
+                            console.log("[DEBUG] 开始解码PCM数据，采样率:", audioData.sample_rate);
+                            
+                            try {
+                                // 创建新的Float32Array来存储PCM数据
+                                const pcmData = new Float32Array(audioArrayBuffer.byteLength / 2);
+                                const dataView = new DataView(audioArrayBuffer);
+                                
+                                // 从Int16转换为Float32
+                                for (let i = 0; i < pcmData.length; i++) {
+                                    pcmData[i] = dataView.getInt16(i * 2, true) / 32768.0;
+                                }
+                                
+                                console.log("[DEBUG] PCM数据准备完成，长度:", pcmData.length);
+                                
+                                // 创建新的AudioBuffer
+                                const audioBuffer = audioContext.createBuffer(1, pcmData.length, audioData.sample_rate);
+                                audioBuffer.getChannelData(0).set(pcmData);
+                                
+                                console.log("[DEBUG] AudioBuffer创建成功");
+                                
+                                // 创建音频源并连接到输出
+                                console.log("[DEBUG] 创建音频源...");
+                                const source = audioContext.createBufferSource();
+                                source.buffer = audioBuffer;
+                                
+                                // 添加增益节点，可以控制音量
+                                const gainNode = audioContext.createGain();
+                                gainNode.gain.value = 1.0; // 音量设置为1.0，可以根据需要调整
+                                
+                                // 连接节点: 音源 -> 增益 -> 目标(扬声器)
+                                source.connect(gainNode);
+                                gainNode.connect(audioContext.destination);
+                                
+                                // 播放结束后处理下一个
+                                source.onended = () => {
+                                    console.log("[DEBUG] 音频播放结束");
+                                    isPlaying = false;
+                                    playNextAudio();
+                                };
+                                
+                                // 开始播放
+                                console.log("[DEBUG] 开始播放音频...");
+                                source.start(0);
+                                console.log("[DEBUG] 播放命令已发送");
+                            } catch (e) {
+                                console.error("[ERROR] AudioBuffer处理失败:", e);
+                                isPlaying = false;
+                                setTimeout(() => {
+                                    playNextAudio();
+                                }, 100);
+                            }
+                        } catch (e) {
+                            console.error("[ERROR] 播放音频失败:", e);
+                            isPlaying = false;
+                            // 延迟一点时间再尝试下一个，避免连续失败造成死循环
+                            setTimeout(() => {
+                                playNextAudio();
+                            }, 100);
+                        }
+                    } else {
+                        console.log("[DEBUG] 不满足播放条件或没有音频可播放");
+                    }
+                }
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {break;}
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    console.log("[DEBUG] 处理", lines.length, "行数据");
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.slice(6);
+                            if (data === '[DONE]') {
+                                console.log("[DEBUG] 收到结束标记 [DONE]");
+                                break;
+                            }
+                            try {
+                                const parsed = JSON.parse(data);
+                                console.log("[DEBUG] 解析的数据类型:", Object.keys(parsed));
+                                
+                                if (parsed.content) {
+                                    // 直接添加单个字符
+                                    messageContent.append(parsed.content);
+                                    scrollToBottom();
+                                } else if (parsed.audio_data) {
+                                    // 收到音频数据，添加到队列
+                                    console.log("[DEBUG] 收到音频数据 chunk_id:", parsed.chunk_id, "数据长度:", parsed.audio_data.length);
+                                    
+                                    // 如果是第一个音频块，尝试开始播放
+                                    const shouldStartPlaying = audioQueue.length === 0 && !isPlaying;
+                                    
+                                    // 添加到队列
+                                    audioQueue.push(parsed);
+                                    
+                                    // 如果之前没有播放，立即开始播放
+                                    if (shouldStartPlaying) {
+                                        console.log("[DEBUG] 调用playNextAudio开始播放");
+                                        playNextAudio();
+                                    }
+                                } else if (parsed.error) {
+                                    console.error("[ERROR] 收到错误:", parsed.error);
+                                    messageContent.append(`<div class="error-message">${parsed.error}</div>`);
+                                    scrollToBottom();
+                                }
+                            } catch (e) {
+                                console.error('[ERROR] 解析数据错误:', e, "数据:", data);
+                            }
+                        }
+                    }
+                }
+
+            } catch (error) {
+                console.error('[ERROR] 发送消息错误:', error);
+                assistantMessageDiv.html(`<div class="error-message">发送消息失败: ${error.message}</div>`);
             }
-            
-            navigator.clipboard.writeText(text).then(() => {
-                copyBtn.html('<i class="fas fa-check"></i>');
-                setTimeout(() => {
-                    copyBtn.html('<i class="fas fa-copy"></i>');
-                }, 1000);
-            }).catch(function(err) {
-                console.error('复制失败:', err);
-                alert('复制失败，请重试');
-            });
+
+        }
+        
+        // 侧边栏切换功能
+        $('#sidebarToggle').on('click', function() {
+          $('.sidebar').toggleClass('active');
+          $('.main-content').toggleClass('active');
+        });
+        
+        // 模型选择变化事件
+        modelSelect.on('change', function() {
+          const selectedModel = $(this).val();
+          if (selectedModel === "选择助手") return;
+          
+          // 清空聊天区域
+          chatMessages.empty();
+          
+          // 根据选择的助手显示不同的欢迎消息
+          let welcomeMessage = "您好！";
+          var ragflow_chat_id = null;
+          var ragflow_model = null;
+          switch(selectedModel) {
+            case "xiaozhi":
+              welcomeMessage += "我是小智，擅长初中物理";
+              ragflow_chat_id = "2150c87c0fca11f0bcd96a8b746c55e2";  
+              ragflow_model = "deepseek-r1:14b@Ollama ";
+              break;
+            case "xiaomei":
+              welcomeMessage += "我是小美，我会加入自己的总结。";
+              ragflow_chat_id = "6f2813840d6d11f0a4349e333fa9eae3";  
+              ragflow_model = "deepseek-v3@Tongyi-Qianwen";
+              break;
+            case "xiaoqiang":
+              welcomeMessage += "我是小强，擅长技术支持和编程指导。";
+              ragflow_chat_id = "6f2813840d6d11f0a4349e333fa9eae3";  
+              ragflow_model = "deepseek-v3@Tongyi-Qianwen";
+              break;
+            case "xiaoming":
+              welcomeMessage += "我是小明，擅长数据分析和逻辑推理。";
+              ragflow_chat_id = "6f2813840d6d11f0a4349e333fa9eae3";  
+              ragflow_model = "deepseek-v3@Tongyi-Qianwen";
+              break;
+            case "xiaoli":
+              welcomeMessage += "我是小李，擅长知识科普和学习辅导。";
+              ragflow_chat_id = "6f2813840d6d11f0a4349e333fa9eae3";  
+              ragflow_model = "deepseek-v3@Tongyi-Qianwen";
+              break;
+          }
+          
+          // 添加欢迎消息
+          chatMessages.append(`
+            <div class="assistant-message">
+              ${welcomeMessage}
+            </div>
+          `);
+
+          $.ajax({
+            url: '{% url "set_model" %}',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ ragflow_chat_id: ragflow_chat_id, ragflow_model: ragflow_model }),
+            success: function(data) {
+              console.log("模型设置成功");
+            },
+            error: function(xhr, status, error) {
+              console.error("模型设置失败:", error);
+            }
           });
-      } catch (error) {
-          console.error("[ERROR] 初始化脚本失败:", error);
-          alert("初始化脚本失败: " + error.message);
-      }
+        });
+        
+        // 添加录音相关变量
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+        
+        // 检查支持的音频格式
+        function getSupportedMimeType() {
+          if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            return 'audio/webm;codecs=opus';
+          } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+            return 'audio/webm';
+          }
+          return 'audio/webm';  // 默认使用webm格式
+        }
+        
+        // 录音按钮点击事件
+        microphoneButton.on('click', async function() {
+          if (!isRecording) {
+            // 开始录音
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({
+                  audio: {
+                      channelCount: 1,
+                      sampleRate: 16000,
+                      echoCancellation: true,
+                      noiseSuppression: true,
+                      autoGainControl: true
+                  }
+              });
+              mediaRecorder = new MediaRecorder(stream, {
+                mimeType: getSupportedMimeType(),
+                audioBitsPerSecond: 16000
+              });
+              audioChunks = [];
+              
+              mediaRecorder.ondataavailable = (event) => {
+                audioChunks.push(event.data);
+              };
+              
+              mediaRecorder.onstop = async () => {
+                try {
+                  // 使用webm格式发送
+                  const audioBlob = new Blob(audioChunks, { type: getSupportedMimeType() });
+                  const formData = new FormData();
+                  formData.append('audio', audioBlob, 'audio.webm');  // 改为.webm扩展名
+                  
+                  // 显示加载提示
+                  chatMessages.append(`
+                    <div class="typing-indicator">
+                      <span class="dot"></span>
+                      <span class="dot"></span>
+                      <span class="dot"></span>
+                    </div>
+                  `);
+                  
+                  const response = await fetch('{% url "process_voice" %}', {
+                    method: 'POST',
+                    body: formData
+                  });
+                  
+                  // 移除加载提示
+                  $('.typing-indicator').remove();
+                  
+                  if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || '语音识别失败');
+                  }
+                  
+                  const data = await response.json();
+                  if (data.text) {
+                    userInput.val(data.text);
+                    sendMessage();
+                  } else {
+                    throw new Error('未获取到识别结果');
+                  }
+                } catch (error) {
+                  console.error('语音处理错误:', error);
+                  alert(error.message || '语音识别失败，请重试');
+                } finally {
+                  // 重置录音状态
+                  audioChunks = [];
+                }
+              };
+              
+              mediaRecorder.start(1000);
+              isRecording = true;
+              microphoneButton.removeClass('btn-light').addClass('btn-danger');
+              
+            } catch (error) {
+              console.error('录音权限错误:', error);
+              alert('无法访问麦克风，请确保已授予录音权限');
+            }
+          } else {
+            // 停止录音
+            mediaRecorder.stop();
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            isRecording = false;
+            microphoneButton.removeClass('btn-danger').addClass('btn-light');
+          }
+        });
+
+        // 添加语音播放功能
+        $(document).on('click', '.speak-btn', async function() {
+          const messageDiv = $(this).closest('.user-message, .assistant-message');
+          let text;
+          
+          // 检查是否存在 .message-content
+          const messageContent = messageDiv.find('.message-content');
+          if (messageContent.length > 0) {
+              // 如果存在 .message-content，获取其文本内容（助手消息）
+              text = messageContent.text().trim();
+          } else {
+              // 否则获取整个消息 div 的文本内容（用户消息）
+              text = messageDiv.clone().children().remove().end().text().trim();
+          }
+          
+          if (!text) {
+              alert('没有找到可播放的文本内容');
+              return;
+          }
+          
+          try {
+              // 显示加载状态
+              const speakBtn = $(this);
+              speakBtn.prop('disabled', true);
+              speakBtn.html('<i class="fas fa-spinner fa-spin"></i>');
+              
+              const response = await fetch('{% url "text_to_speech" %}', {
+                  method: 'POST',
+                  headers: {
+                      'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ text: text })
+              });
+              
+              if (!response.ok) {
+                  throw new Error('语音合成失败');
+              }
+              
+              // 获取音频数据并播放
+              const audioBlob = await response.blob();
+              const audioUrl = URL.createObjectURL(audioBlob);
+              const audio = new Audio(audioUrl);
+              
+              audio.onended = function() {
+                  URL.revokeObjectURL(audioUrl);
+                  speakBtn.prop('disabled', false);
+                  speakBtn.html('<i class="fas fa-volume-up"></i>');
+              };
+              
+              audio.onerror = function() {
+                  URL.revokeObjectURL(audioUrl);
+                  speakBtn.prop('disabled', false);
+                  speakBtn.html('<i class="fas fa-volume-up"></i>');
+                  alert('音频播放失败');
+              };
+              
+              await audio.play();
+              
+          } catch (error) {
+              console.error('语音播放错误:', error);
+              alert('语音播放失败，请重试');
+              $(this).prop('disabled', false).html('<i class="fas fa-volume-up"></i>');
+          }
+        });
+
+        // 添加复制功能
+        $(document).on('click', '.copy-btn', function() {
+          const copyBtn = $(this);
+          const messageDiv = copyBtn.closest('.user-message, .assistant-message');
+          let text;
+          
+          // 检查是否存在 .message-content
+          const messageContent = messageDiv.find('.message-content');
+          if (messageContent.length > 0) {
+              // 如果存在 .message-content，获取其文本内容
+              text = messageContent.text().trim();
+          } else {
+              // 否则获取整个消息 div 的文本内容（用于用户消息）
+              text = messageDiv.clone().children().remove().end().text().trim();
+          }
+          
+          navigator.clipboard.writeText(text).then(() => {
+              copyBtn.html('<i class="fas fa-check"></i>');
+              setTimeout(() => {
+                  copyBtn.html('<i class="fas fa-copy"></i>');
+              }, 1000);
+          }).catch(function(err) {
+              console.error('复制失败:', err);
+              alert('复制失败，请重试');
+          });
+        });
+
     });
   </script>
 {% endblock %}
