@@ -8,11 +8,13 @@
       padding: 20px 20px 20px 20px;
       min-height: calc(100vh - 56px - 56px); /* 只减去导航栏高度 */
       margin-top: 20px;
-      border-radius: 20px 20px 20px 20px; /* 修改为顶部圆角 */
+      margin-bottom: 20px;
+      border-radius: 20px; /* 四周圆角 */
       box-shadow: 0 0 10px rgba(0,0,0,0.1);
       position: relative;
       padding-bottom: 80px;  /* 增加底部padding */
-      width: 100%;
+      width: 100%; /* 占满父容器宽度 */
+      max-width: 1000px; /* 限制最大宽度，提升阅读体验 */
       box-sizing: border-box;
     }
     .input-area {
@@ -35,6 +37,32 @@
       position: absolute;
       bottom: 10px;
       right: 10px;
+    }
+
+    .sidebar #uploadDocuments {
+      position: absolute;
+      bottom: 20px;
+      left: 10%;
+      width: 80%; /* 宽度占底部80% */
+      text-align: center; /* 文本居中 */
+      padding: 8px 0;
+      border-radius: 5px;
+      background-color: #f0f0f0;
+      border: 1px solid #ddd;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+    .sidebar #uploadDocuments i {
+      margin-right: 5px;
+    }
+
+    .sidebar #uploadDocuments:hover {
+      background-color: #e0e0e0;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
 
     .content-area {
@@ -118,7 +146,7 @@
       top: 77px; /* 导航栏高度 */
       left: 0;
       height: calc(100vh - 77px - 27px);
-      width: 200px;
+      width: 220px; /* 增加宽度 */
       background-color: #f8f9fa;
       padding-top: 20px;
       box-shadow: 2px 0 5px rgba(0,0,0,0.1);
@@ -179,14 +207,18 @@
     
     /* 主内容区域调整 */
     .main-content {
-      margin-left: 250px;
+      margin-left: 220px; /* 与侧边栏宽度一致 */
       transition: all 0.3s;
+      width: calc(100% - 220px); /* 减去侧边栏宽度 */
+      padding: 0 20px; /* 左右内边距 */
+      display: flex;
+      justify-content: center; /* 水平居中 */
     }
     
     /* 响应式设计 */
     @media (max-width: 768px) {
       .sidebar {
-        margin-left: -250px;
+        margin-left: -220px; /* 与侧边栏宽度一致 */
       }
       
       .sidebar.active {
@@ -195,10 +227,13 @@
       
       .main-content {
         margin-left: 0;
+        width: 100%;
+        padding: 0 10px;
       }
       
       .main-content.active {
-        margin-left: 250px;
+        margin-left: 220px; /* 与侧边栏宽度一致 */
+        width: calc(100% - 220px);
       }
     }
 
@@ -233,6 +268,44 @@
     .message-buttons button:hover {
       background-color: #f8f9fa;
     }
+
+    /* 添加系统消息样式 */
+    .system-message {
+      position: relative;
+      display: inline-block;
+      margin-bottom: 15px;
+      padding: 10px 15px;
+      border-radius: 10px;
+      width: fit-content;
+      max-width: 80%;
+      background-color: #f5f5f5;
+      align-self: center;
+      word-wrap: break-word;
+      text-align: center;
+      font-size: 0.9em;
+      color: #666;
+    }
+    
+    .system-message.success {
+      background-color: #e6f7e6;
+      color: #2c7a2c;
+      border: 1px solid #c8e6c8;
+    }
+    
+    .system-message.error {
+      background-color: #fde7e7;
+      color: #d32f2f;
+      border: 1px solid #f5c8c8;
+    }
+    
+    .system-message i {
+      margin-right: 5px;
+    }
+    
+    /* 允许文件多选 */
+    #fileUpload {
+      display: none;
+    }
 </style>
 {% endblock %}
 
@@ -252,6 +325,9 @@
     <ul class="sidebar-menu" id="chatHistory">
       <!-- 聊天历史记录将在这里动态添加 -->
     </ul>
+    <button class="btn btn-sm" type="button" id="uploadDocuments">
+      <i class="fa-solid fa-file-arrow-up"></i> 上传文档
+    </button>
   </div>
 
   <!-- 主内容区域 -->
@@ -282,7 +358,84 @@
         const userInput = $('#userInput');
         const modelSelect = $('#modelSelect');
         const microphoneButton = $('#microphoneButton');
+        const uploadDocumentsButton = $('#uploadDocuments');
 
+        // 添加隐藏的文件上传输入框
+        $('body').append('<input type="file" id="fileUpload" style="display: none;" accept=".pdf,.doc,.docx,.txt" multiple>');
+        const fileUpload = $('#fileUpload');
+
+        // 处理文件上传按钮点击
+        uploadDocumentsButton.on('click', function() {
+            fileUpload.click();
+        });
+
+        // 处理文件选择
+        fileUpload.on('change', function(e) {
+            const files = e.target.files;
+            if (files.length > 0) {
+                uploadFiles(files);
+            }
+        });
+
+        // 上传文件函数
+        function uploadFiles(files) {
+            // 创建FormData对象
+            const formData = new FormData();
+            
+            // 添加选择的文件
+            for (let i = 0; i < files.length; i++) {
+                formData.append('documents', files[i]);
+            }
+            
+            // 显示上传中提示
+            chatMessages.append(`
+                <div class="system-message">
+                    <i class="fas fa-spinner fa-spin"></i> 正在上传文档，请稍候...
+                </div>
+            `);
+            scrollToBottom();
+            
+            // 发送上传请求 - 注意：需要在后端实现此接口
+            // TODO: 将URL替换为实际的上传端点
+            $.ajax({
+                url: '/upload_documents',  // 替换为实际的上传URL
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                success: function(response) {
+                    // 移除上传中提示
+                    $('.system-message').remove();
+                    
+                    // 显示上传成功消息
+                    chatMessages.append(`
+                        <div class="system-message success">
+                            <i class="fas fa-check-circle"></i> 文档上传成功！
+                        </div>
+                    `);
+                    scrollToBottom();
+                    
+                    // 清空文件输入框，允许重复上传同一文件
+                    fileUpload.val('');
+                },
+                error: function(xhr, status, error) {
+                    // 移除上传中提示
+                    $('.system-message').remove();
+                    
+                    // 显示错误消息
+                    chatMessages.append(`
+                        <div class="system-message error">
+                            <i class="fas fa-exclamation-circle"></i> 文档上传失败: ${xhr.responseJSON?.error || error}
+                        </div>
+                    `);
+                    scrollToBottom();
+                    
+                    // 清空文件输入框
+                    fileUpload.val('');
+                }
+            });
+        }
+        
         // 创建音频上下文 - 提前创建以允许用户交互激活
         let audioContext;
         try {
