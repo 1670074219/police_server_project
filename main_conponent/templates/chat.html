@@ -336,7 +336,7 @@
         
         // 清空输入框并滚动到底部
         userInput.val('');
-        scrollToBottom();
+        // scrollToBottom();
 
         try {
             const response = await fetch('{% url "chat_with_model" %}', {
