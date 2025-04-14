@@ -8,11 +8,14 @@ import asyncio
 import os
 import re
 import threading
+
+# from test import assistant
 from ..services.tts_service import TTSManager
 from ..services.ragflow_service import RagFlowService
 from openai import OpenAI
 import dashscope
 from dashscope.audio.tts_v2 import *
+from ragflow_sdk import RAGFlow
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -105,7 +108,8 @@ class Callback(ResultCallback):
         logger.info("TTS连接已关闭")
         
     def on_event(self, message):
-        logger.info(f"TTS事件: {message}")
+        pass
+        #logger.info(f"TTS事件: {message}")
         
     def on_data(self, data: bytes) -> None:
         try:
@@ -116,7 +120,7 @@ class Callback(ResultCallback):
             chunk_id = self.current_index
             self.current_index += 1
             
-            logger.info(f"收到音频数据: {len(data)}字节, chunk_id: {chunk_id}")
+            # logger.info(f"收到音频数据: {len(data)}字节, chunk_id: {chunk_id}")
             
             # 创建音频数据JSON
             audio_json = json.dumps({
@@ -132,16 +136,27 @@ class Callback(ResultCallback):
             logger.error(f"处理音频数据时出错: {str(e)}")
 
 def generate_response(message):
+    rag_object = RAGFlow(
+        api_key="ragflow-BhYTBmYWUyMGVmOTExZjBiMDIzNmE4Yj",
+        base_url="http://219.216.99.136:6523",
+    )
+
+    assistant_list = rag_object.list_chats(name="小智")
+    assistant = assistant_list[0]
+    session = assistant.list_sessions(name="server")[0]
+
     """生成流式响应"""
     yield 'retry: 1000\n\n'
     
     try:
-        response = ragflow_service.client.chat.completions.create(
-            model=ragflow_service.model_name,
-            messages=[{"role": "user", "content": message}],
-            stream=True,
-            timeout=120
-        )
+        # response = ragflow_service.client.chat.completions.create(
+        #     model=ragflow_service.model_name,
+        #     messages=[{"role": "user", "content": message}],
+        #     stream=True,
+        #     timeout=120
+        # )
+
+        response = session.ask(message, stream=True)
         
         callback = Callback()
         synthesizer = SpeechSynthesizer(
@@ -150,21 +165,17 @@ def generate_response(message):
             format=AudioFormat.PCM_16000HZ_MONO_16BIT,  # 改为16000Hz
             callback=callback
         )
+
+        content = ""
         
         for chunk in response:
-            content = chunk.choices[0].delta.content
-            if not content:
-                continue
-                
-            logger.info(f"收到文本内容: '{content}'")
-            
             # 发送文本
-            for char in content:
+            for char in chunk.content[len(content):]:
                 yield f"data: {json.dumps({'content': char})}\n\n"
             
             # 发送语音
             try:
-                synthesizer.streaming_call(content)
+                synthesizer.streaming_call(chunk.content[len(content):])
                 
                 # 给TTS服务一些时间生成音频
                 await_time = 0
@@ -180,6 +191,9 @@ def generate_response(message):
                     callback.audio_chunks = []
             except Exception as e:
                 logger.error(f"处理音频时出错: {str(e)}")
+
+            content = chunk.content
+            logger.info(f"收到文本内容: '{content}'")
         
         # 完成TTS流式合成
         try:

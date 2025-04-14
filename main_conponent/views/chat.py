@@ -13,7 +13,10 @@ import time
 from dashscope.audio.tts_v2 import SpeechSynthesizer, AudioFormat
 import pyaudio
 import json
+
+# from test import assistant
 from ..services.asr_service import ASRCallback
+from ragflow_sdk import RAGFlow
 
 # 设置日志
 logger = logging.getLogger(__name__)
@@ -21,8 +24,135 @@ logger = logging.getLogger(__name__)
 # 设置API key
 dashscope.api_key = "sk-d7b419aabe41461a99febae96b60b030"
 
+# RAGFlow配置
+RAGFLOW_API_KEY = "ragflow-BhYTBmYWUyMGVmOTExZjBiMDIzNmE4Yj"  
+RAGFLOW_BASE_URL = "http://219.216.99.136:6523"  
+RAGFLOW_DATASET = "demo"  # 默认数据集名称
+RAGFLOW_DATASET_ID = "82165e840ef711f0b6896a8b746c55e2"  # 数据集ID
+
 def chat_page(request):
     return render(request, 'chat.html')
+
+def document_management(request):
+    return render(request, 'document_management.html')
+
+@csrf_exempt
+def list_documents(request):
+    """获取文档列表"""
+    try:
+        # 获取请求参数
+        page = int(request.GET.get('page', 1))
+        page_size = int(request.GET.get('page_size', 10))
+        keywords = request.GET.get('keywords', None)
+        
+        # 创建RAGFlow客户端
+        rag_object = RAGFlow(api_key=RAGFLOW_API_KEY, base_url=RAGFLOW_BASE_URL)
+        
+        # 获取数据集
+        dataset_list = rag_object.list_datasets(id=RAGFLOW_DATASET_ID)
+        if not dataset_list:
+            return JsonResponse({
+                'success': False,
+                'error': '未找到数据集'
+            }, status=404)
+        
+        dataset = dataset_list[0]
+        
+        # 获取文档列表
+        documents = dataset.list_documents(
+            keywords=keywords,
+            page=page,
+            page_size=page_size,
+            orderby="update_time",
+            desc=True
+        )
+        
+        # 计算总页数（这里假设RAGFlow SDK不直接提供总记录数）
+        # 如果返回的文档数小于page_size，说明是最后一页
+        is_last_page = len(documents) < page_size
+        # 如果是第一页且为空，总页数为1
+        if page == 1 and len(documents) == 0:
+            total_pages = 1
+        # 如果是最后一页，计算总页数
+        elif is_last_page:
+            total_pages = page
+        # 否则至少还有下一页
+        else:
+            total_pages = page + 1
+        
+        # 转换文档对象为可序列化的字典
+        serialized_docs = []
+        for doc in documents:
+            serialized_docs.append({
+                'id': doc.id,
+                'name': doc.name or "未命名文档",
+                'size': doc.size,
+                'token_count': doc.token_count,
+                'chunk_count': doc.chunk_count,
+                'progress': doc.progress,
+                'progress_msg': doc.progress_msg,
+                'process_begin_at': doc.process_begin_at,
+                'process_duration': getattr(doc, 'process_duation', 0),  # 注意这里可能有拼写错误
+                'run': doc.run,
+                'status': doc.status
+            })
+        
+        return JsonResponse({
+            'success': True,
+            'documents': serialized_docs,
+            'total_pages': total_pages,
+            'current_page': page,
+            'page_size': page_size
+        })
+        
+    except Exception as e:
+        logger.exception(f"获取文档列表出错: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': f"服务器错误: {str(e)}"
+        }, status=500)
+
+@csrf_exempt
+def delete_document(request):
+    """删除文档"""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': '只接受POST请求'}, status=405)
+    
+    try:
+        # 解析请求体
+        data = json.loads(request.body)
+        document_id = data.get('document_id')
+        
+        if not document_id:
+            return JsonResponse({'success': False, 'error': '缺少文档ID'}, status=400)
+        
+        # 创建RAGFlow客户端
+        rag_object = RAGFlow(api_key=RAGFLOW_API_KEY, base_url=RAGFLOW_BASE_URL)
+        
+        # 获取数据集
+        dataset_list = rag_object.list_datasets(id=RAGFLOW_DATASET_ID)
+        if not dataset_list:
+            return JsonResponse({
+                'success': False,
+                'error': '未找到数据集'
+            }, status=404)
+        
+        dataset = dataset_list[0]
+        
+        # 删除文档
+        dataset.delete_documents(ids=[document_id])
+        
+        return JsonResponse({
+            'success': True,
+            'message': '文档删除成功'
+        })
+        
+    except Exception as e:
+        logger.exception(f"删除文档出错: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': f"服务器错误: {str(e)}"
+        }, status=500)
 
 @csrf_exempt
 def process_voice(request):
@@ -229,3 +359,143 @@ def text_to_speech(request):
             return JsonResponse({'error': f'服务器错误: {str(e)}'}, status=500)
 
     return JsonResponse({'error': '不支持的请求方法'}, status=400)
+
+@csrf_exempt
+def upload_documents(request):
+    """
+    处理文档上传和解析，API信息和URL直接在后端代码中设置
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': '只接受POST请求'}, status=405)
+    
+    try:
+        # 确保上传目录存在
+        upload_dir = 'upload_temp'
+        if not os.path.exists(upload_dir):
+            os.makedirs(upload_dir)
+        
+        # 检查是否有文件上传
+        if not request.FILES.getlist('documents'):
+            return JsonResponse({'error': '没有收到文档文件'}, status=400)
+        
+        # 使用后端预设的RAGFlow配置
+        api_key = RAGFLOW_API_KEY
+        base_url = RAGFLOW_BASE_URL
+        dataset_name = RAGFLOW_DATASET
+        
+        # 创建RAGFlow客户端
+        logger.info(f"创建RAGFlow客户端: base_url={base_url}")
+        rag_object = RAGFlow(api_key=api_key, base_url=base_url)
+        
+        # 创建数据集对象
+        logger.info(f"使用数据集: {dataset_name}")
+        dataset_list = rag_object.list_datasets(id=RAGFLOW_DATASET_ID)
+        dataset = dataset_list[0]
+        
+        # 准备上传文档
+        logger.info("准备上传文档...")
+        documents = []
+        for file in request.FILES.getlist('documents'):
+            # 读取文件内容
+            file_content = file.read()
+            
+            # 添加到文档列表
+            documents.append({
+                'display_name': file.name,
+                'blob': file_content
+            })
+            
+            logger.info(f"添加文件: {file.name}, 大小: {len(file_content)} 字节")
+        
+        # 上传文档
+        logger.info(f"上传 {len(documents)} 个文档...")
+        dataset.upload_documents(documents)
+        
+        # 返回上传成功结果，不管解析是否成功
+        upload_result = {
+            'success': True, 
+            'message': '文档已成功上传',
+            'documents_count': len(documents)
+        }
+        
+        # 尝试解析文档，但不影响上传结果
+        try:
+            # 获取上传的文档ID
+            logger.info("获取文档列表...")
+            document_list = dataset.list_documents(keywords=None)
+            
+            if document_list:
+                # 收集文档ID
+                doc_ids = []
+                for document in document_list:
+                    doc_ids.append(document.id)
+                
+                if doc_ids:
+                    # 异步解析文档
+                    logger.info(f"开始异步解析 {len(doc_ids)} 个文档...")
+                    try:
+                        dataset.async_parse_documents(doc_ids)
+                        logger.info("文档解析任务已提交")
+                        upload_result['message'] = '文档已成功上传并开始解析'
+                        upload_result['documents_processed'] = len(doc_ids)
+                    except Exception as parse_error:
+                        logger.warning(f"解析文档时出错，但不影响上传: {str(parse_error)}")
+                        upload_result['message'] = '文档已成功上传，解析将在后台自动进行'
+            else:
+                logger.warning("找不到文档列表，无法解析文档")
+        except Exception as list_error:
+            logger.warning(f"获取文档列表或解析文档时出错，但不影响上传: {str(list_error)}")
+        
+        # 返回成功结果
+        return JsonResponse(upload_result)
+        
+    except Exception as e:
+        logger.exception(f"文档上传处理出错: {str(e)}")
+        return JsonResponse({'error': f"服务器错误: {str(e)}"}, status=500)
+    
+def newchat(request):
+    """创建新的聊天会话"""
+    try:
+        # 创建RAGFlow客户端
+        rag_object = RAGFlow(api_key=RAGFLOW_API_KEY, base_url=RAGFLOW_BASE_URL)
+        
+        # 获取聊天助手
+        assistant_list = rag_object.list_chats(name='小智')
+        
+        if not assistant_list:
+            return JsonResponse({
+                'success': False,
+                'error': '找不到指定的聊天助手'
+            }, status=404)
+        
+        assistant = assistant_list[0]
+        
+        # 列出所有名为server的会话
+        logger.info(f"正在查找名为'server'的会话")
+        sessions = assistant.list_sessions(name='server')
+        
+        # 如果有旧会话，删除它们
+        if sessions:
+            session_ids = [session.id for session in sessions]
+            logger.info(f"找到 {len(session_ids)} 个会话，准备删除")
+            assistant.delete_sessions(ids=session_ids)
+            logger.info(f"已删除旧会话")
+        else:
+            logger.info(f"未找到旧会话")
+        
+        # 创建新会话
+        session = assistant.create_session(name='server')
+        logger.info(f"已创建新会话，ID: {session.id}")
+        
+        return JsonResponse({
+            'success': True,
+            'message': '新对话已创建',
+            'session_id': session.id
+        })
+        
+    except Exception as e:
+        logger.exception(f"创建新对话时出错: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'error': f"服务器错误: {str(e)}"
+        }, status=500)

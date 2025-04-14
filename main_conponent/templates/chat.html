@@ -56,6 +56,41 @@
       font-size: 14px;
     }
 
+    .container-md #newChat {
+      position: absolute;
+      bottom: 100px;
+      right: 1%;
+      width: 10%; /* 宽度占底部80% */
+      text-align: center; /* 文本居中 */
+      padding: 8px 0;
+      border-radius: 20px;
+      /* background-color: #f0f0f0; */
+      border: 1px solid #ddd;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+
+    .sidebar #documentManagement {
+      position: absolute;
+      bottom: 20px;
+      left: 10%;
+      width: 80%; /* 宽度占底部80% */
+      text-align: center; /* 文本居中 */
+      padding: 8px 0;
+      border-radius: 5px;
+      background-color: #f0f0f0;
+      border: 1px solid #ddd;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
     .sidebar #uploadDocuments i {
       margin-right: 5px;
     }
@@ -325,8 +360,11 @@
     <ul class="sidebar-menu" id="chatHistory">
       <!-- 聊天历史记录将在这里动态添加 -->
     </ul>
-    <button class="btn btn-sm" type="button" id="uploadDocuments">
+    <!-- <button class="btn btn-sm" type="button" id="uploadDocuments">
       <i class="fa-solid fa-file-arrow-up"></i> 上传文档
+    </button> -->
+    <button class="btn btn-sm mt-2" type="button" id="documentManagement">
+      <i class="fa-solid fa-folder"></i>  文档管理
     </button>
   </div>
 
@@ -346,6 +384,9 @@
       
       <textarea class="form-control input-area" id="userInput" placeholder="问我任何问题，按Shift+Enter换行" aria-label="用户输入"></textarea>
       <button class="btn btn-sm btn-light" type="button" id="microphoneButton"><i class="fa-solid fa-microphone"></i></button>
+      <button class="btn btn-sm mt-2" type="button" id="newChat">
+        <i class="fa-solid fa-plus"></i> 新对话
+      </button>
 
     </div>
   </div>
@@ -359,6 +400,8 @@
         const modelSelect = $('#modelSelect');
         const microphoneButton = $('#microphoneButton');
         const uploadDocumentsButton = $('#uploadDocuments');
+        const documentManagementButton = $('#documentManagement');
+        const newChatButton = $('#newChat');
 
         // 添加隐藏的文件上传输入框
         $('body').append('<input type="file" id="fileUpload" style="display: none;" accept=".pdf,.doc,.docx,.txt" multiple>');
@@ -948,6 +991,76 @@
               console.error('复制失败:', err);
               alert('复制失败，请重试');
           });
+        });
+
+        // 添加文档管理按钮点击事件
+        documentManagementButton.on('click', function() {
+            window.location.href = '/document_management';
+        });
+
+        // 添加新对话按钮点击事件
+        newChatButton.on('click', function() {
+            // 禁用按钮，显示加载状态
+            $(this).prop('disabled', true);
+            $(this).html('<i class="fas fa-spinner fa-spin"></i> 处理中...');
+            
+            // 发送AJAX请求创建新对话
+            $.ajax({
+                url: '/newchat',
+                type: 'GET',
+                success: function(response) {
+                    if (response.success) {
+                        // 清空当前聊天记录
+                        chatMessages.html(`
+                            <div class="text-center mb-1">
+                                <img src="{% static 'images/government_service.png' %}" class="img-fluid" style="max-height: 200px;">
+                            </div>
+                            <h5 class="text-center mb-4">智能对话助手</h5>
+                            <div class="assistant-message">
+                                您好！我是基于RagFlow的智能助手，请问有什么可以帮助您的？
+                            </div>
+                        `);
+                        
+                        // 显示成功提示
+                        chatMessages.append(`
+                            <div class="system-message success">
+                                <i class="fas fa-check-circle"></i> ${response.message}
+                            </div>
+                        `);
+                        
+                        // 滚动到底部
+                        scrollToBottom();
+                    } else {
+                        // 显示错误信息
+                        chatMessages.append(`
+                            <div class="system-message error">
+                                <i class="fas fa-exclamation-circle"></i> 创建新对话失败: ${response.error || '未知错误'}
+                            </div>
+                        `);
+                        scrollToBottom();
+                    }
+                },
+                error: function(xhr) {
+                    // 显示错误信息
+                    let errorMessage = '创建新对话失败';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        errorMessage = response.error || errorMessage;
+                    } catch (e) {}
+                    
+                    chatMessages.append(`
+                        <div class="system-message error">
+                            <i class="fas fa-exclamation-circle"></i> ${errorMessage}
+                        </div>
+                    `);
+                    scrollToBottom();
+                },
+                complete: function() {
+                    // 恢复按钮状态
+                    newChatButton.prop('disabled', false);
+                    newChatButton.html('<i class="fa-solid fa-plus"></i> 新对话');
+                }
+            });
         });
 
     });

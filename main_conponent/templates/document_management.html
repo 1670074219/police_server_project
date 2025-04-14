@@ -1,0 +1,605 @@
+{% extends 'layout.html' %}
+{% load static %}
+
+{% block style %}
+<style>
+    .container-md {
+        background-color: #f8f9fa;
+        padding: 20px;
+        min-height: calc(100vh - 56px - 56px);
+        margin-top: 20px;
+        margin-bottom: 20px;
+        border-radius: 20px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        width: 100%;
+        max-width: 1000px;
+        box-sizing: border-box;
+    }
+    
+    .page-title {
+        text-align: center;
+        margin-bottom: 30px;
+        color: #333;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #dee2e6;
+    }
+    
+    .doc-table {
+        width: 100%;
+        margin-bottom: 20px;
+    }
+    
+    .doc-table th {
+        padding: 12px 15px;
+        background-color: #f0f0f0;
+        border-bottom: 2px solid #dee2e6;
+        text-align: left;
+    }
+    
+    .doc-table td {
+        padding: 12px 15px;
+        border-bottom: 1px solid #eee;
+        vertical-align: middle;
+    }
+    
+    .status-badge {
+        padding: 5px 10px;
+        border-radius: 15px;
+        font-size: 12px;
+        font-weight: 500;
+    }
+    
+    .status-done {
+        background-color: #d4edda;
+        color: #155724;
+    }
+    
+    .status-processing {
+        background-color: #fff3cd;
+        color: #856404;
+    }
+    
+    .status-unprocessed {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+    
+    .status-failed {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+    
+    .action-btn {
+        margin-right: 5px;
+    }
+    
+    .header-actions {
+        margin-bottom: 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .loading-spinner {
+        display: flex;
+        justify-content: center;
+        padding: 50px 0;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 50px 0;
+        color: #6c757d;
+    }
+    
+    .empty-state i {
+        font-size: 48px;
+        margin-bottom: 20px;
+        opacity: 0.5;
+    }
+    
+    .doc-name {
+        word-break: break-word;
+        max-width: 300px;
+    }
+    
+    .pagination-container {
+        display: flex;
+        justify-content: center;
+        margin-top: 20px;
+    }
+    
+    /* 确认删除对话框 */
+    .modal-footer {
+        justify-content: space-between;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-md">
+    <h2 class="page-title">文档管理</h2>
+    
+    <div class="header-actions">
+        <div>
+            <button class="btn btn-primary" id="uploadBtn">
+                <i class="fas fa-upload"></i> 上传文档
+            </button>
+            <button class="btn btn-secondary" id="refreshBtn">
+                <i class="fas fa-sync-alt"></i> 刷新
+            </button>
+        </div>
+        <div class="search-box">
+            <div class="input-group">
+                <input type="text" id="searchInput" class="form-control" placeholder="搜索文档名称...">
+                <button class="btn btn-outline-secondary" type="button" id="searchBtn">
+                    <i class="fas fa-search"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="documentsList">
+        <div class="loading-spinner">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="pagination-container">
+        <nav aria-label="文档分页">
+            <ul class="pagination" id="pagination">
+                <!-- 分页将在JavaScript中动态生成 -->
+            </ul>
+        </nav>
+    </div>
+</div>
+
+<!-- 文件上传对话框 -->
+<div class="modal fade" id="uploadModal" tabindex="-1" aria-labelledby="uploadModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="uploadModalLabel">上传文档</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="documentFiles" class="form-label">选择文件</label>
+                        <input class="form-control" type="file" id="documentFiles" name="documents" multiple>
+                    </div>
+                </form>
+                <div id="uploadProgress" style="display: none;">
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                    </div>
+                    <p class="text-center mt-2" id="uploadStatus">准备上传...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" id="startUploadBtn">上传</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 确认删除对话框 -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteModalLabel">确认删除</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>您确定要删除文档 "<span id="deleteDocName"></span>" 吗？</p>
+                <p class="text-danger">此操作不可撤销！</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">确认删除</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+    $(document).ready(function() {
+        let currentPage = 1;
+        const pageSize = 10;
+        let totalPages = 1;
+        let searchKeywords = '';
+        let documentIdToDelete = '';
+        
+        // 初始加载文档列表
+        loadDocuments(currentPage, pageSize, searchKeywords);
+        
+        // 刷新按钮点击事件
+        $('#refreshBtn').on('click', function() {
+            loadDocuments(currentPage, pageSize, searchKeywords);
+        });
+        
+        // 搜索按钮点击事件
+        $('#searchBtn').on('click', function() {
+            searchKeywords = $('#searchInput').val().trim();
+            currentPage = 1; // 重置到第一页
+            loadDocuments(currentPage, pageSize, searchKeywords);
+        });
+        
+        // 回车键搜索
+        $('#searchInput').on('keypress', function(e) {
+            if (e.which === 13) {
+                searchKeywords = $(this).val().trim();
+                currentPage = 1;
+                loadDocuments(currentPage, pageSize, searchKeywords);
+            }
+        });
+        
+        // 上传按钮点击事件
+        $('#uploadBtn').on('click', function() {
+            $('#uploadModal').modal('show');
+        });
+        
+        // 开始上传按钮点击事件
+        $('#startUploadBtn').on('click', function() {
+            const fileInput = $('#documentFiles')[0];
+            if (fileInput.files.length === 0) {
+                alert('请选择至少一个文件！');
+                return;
+            }
+            
+            const formData = new FormData();
+            for (let i = 0; i < fileInput.files.length; i++) {
+                formData.append('documents', fileInput.files[i]);
+            }
+            
+            // 显示上传进度
+            $('#startUploadBtn').prop('disabled', true);
+            $('#uploadProgress').show();
+            $('.progress-bar').css('width', '0%');
+            $('#uploadStatus').text('上传中...');
+            
+            $.ajax({
+                url: '/upload_documents',
+                type: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                xhr: function() {
+                    const xhr = new window.XMLHttpRequest();
+                    xhr.upload.addEventListener('progress', function(e) {
+                        if (e.lengthComputable) {
+                            const percent = Math.round((e.loaded / e.total) * 100);
+                            $('.progress-bar').css('width', percent + '%');
+                            $('#uploadStatus').text(`已上传 ${percent}%`);
+                        }
+                    }, false);
+                    return xhr;
+                },
+                success: function(response) {
+                    $('.progress-bar').css('width', '100%');
+                    $('#uploadStatus').text(response.message || '上传成功！');
+                    setTimeout(function() {
+                        $('#uploadModal').modal('hide');
+                        $('#uploadProgress').hide();
+                        $('#startUploadBtn').prop('disabled', false);
+                        $('#documentFiles').val('');
+                        
+                        // 刷新文档列表
+                        loadDocuments(1, pageSize, searchKeywords);
+                    }, 1500);
+                },
+                error: function(xhr) {
+                    let errorMessage = '上传失败！';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        errorMessage = response.error || errorMessage;
+                    } catch (e) {}
+                    
+                    $('#uploadStatus').text(errorMessage);
+                    $('.progress-bar').addClass('bg-danger');
+                    setTimeout(function() {
+                        $('#uploadProgress').hide();
+                        $('#startUploadBtn').prop('disabled', false);
+                        $('.progress-bar').removeClass('bg-danger');
+                    }, 3000);
+                }
+            });
+        });
+        
+        // 加载文档列表函数
+        function loadDocuments(page, pageSize, keywords) {
+            $('#documentsList').html(`
+                <div class="loading-spinner">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">加载中...</span>
+                    </div>
+                </div>
+            `);
+            
+            $.ajax({
+                url: '/list_documents',
+                type: 'GET',
+                data: {
+                    page: page,
+                    page_size: pageSize,
+                    keywords: keywords
+                },
+                success: function(response) {
+                    if (response.success) {
+                        renderDocumentsList(response.documents, response.total_pages);
+                        totalPages = response.total_pages;
+                        renderPagination(page, totalPages);
+                    } else {
+                        $('#documentsList').html(`
+                            <div class="alert alert-danger" role="alert">
+                                加载文档失败: ${response.error || '未知错误'}
+                            </div>
+                        `);
+                    }
+                },
+                error: function(xhr) {
+                    let errorMessage = '加载文档失败';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        errorMessage = response.error || errorMessage;
+                    } catch (e) {}
+                    
+                    $('#documentsList').html(`
+                        <div class="alert alert-danger" role="alert">
+                            ${errorMessage}
+                        </div>
+                    `);
+                }
+            });
+        }
+        
+        // 渲染文档列表
+        function renderDocumentsList(documents, totalPages) {
+            if (!documents || documents.length === 0) {
+                $('#documentsList').html(`
+                    <div class="empty-state">
+                        <i class="fas fa-file-alt"></i>
+                        <h4>没有找到文档</h4>
+                        <p>上传新文档或尝试其他搜索关键词</p>
+                    </div>
+                `);
+                return;
+            }
+            
+            let html = `
+                <table class="doc-table">
+                    <thead>
+                        <tr>
+                            <th>文档名称</th>
+                            <th>状态</th>
+                            <th>大小</th>
+                            <th>更新时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            documents.forEach(doc => {
+                const statusClass = getStatusClass(doc.run);
+                const statusText = getStatusText(doc.run);
+                const formattedSize = formatFileSize(doc.size);
+                const updateTime = formatDate(doc.process_begin_at);
+                
+                html += `
+                    <tr data-id="${doc.id}">
+                        <td class="doc-name" title="${doc.name}">${doc.name}</td>
+                        <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                        <td>${formattedSize}</td>
+                        <td>${updateTime}</td>
+                        <td>
+                            <button class="btn btn-sm btn-danger delete-doc-btn" data-id="${doc.id}" data-name="${doc.name}">
+                                <i class="fas fa-trash-alt"></i> 删除
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                    </tbody>
+                </table>
+            `;
+            
+            $('#documentsList').html(html);
+            
+            // 绑定删除按钮事件
+            $('.delete-doc-btn').on('click', function() {
+                const docId = $(this).data('id');
+                const docName = $(this).data('name');
+                documentIdToDelete = docId;
+                
+                $('#deleteDocName').text(docName);
+                $('#deleteModal').modal('show');
+            });
+        }
+        
+        // 确认删除按钮点击事件
+        $('#confirmDeleteBtn').on('click', function() {
+            if (!documentIdToDelete) return;
+            
+            // 禁用按钮防止重复点击
+            $(this).prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 删除中...');
+            
+            $.ajax({
+                url: '/delete_document',
+                type: 'POST',
+                data: JSON.stringify({
+                    document_id: documentIdToDelete
+                }),
+                contentType: 'application/json',
+                success: function(response) {
+                    $('#deleteModal').modal('hide');
+                    $('#confirmDeleteBtn').prop('disabled', false).html('确认删除');
+                    
+                    if (response.success) {
+                        // 从DOM中移除已删除的文档行
+                        $(`tr[data-id="${documentIdToDelete}"]`).fadeOut(300, function() {
+                            $(this).remove();
+                            
+                            // 如果当前页没有文档了，返回上一页
+                            if ($('#documentsList tbody tr').length === 0 && currentPage > 1) {
+                                currentPage--;
+                                loadDocuments(currentPage, pageSize, searchKeywords);
+                            } else if ($('#documentsList tbody tr').length === 0) {
+                                // 如果是第一页且没有文档，显示空状态
+                                $('#documentsList').html(`
+                                    <div class="empty-state">
+                                        <i class="fas fa-file-alt"></i>
+                                        <h4>没有找到文档</h4>
+                                        <p>上传新文档或尝试其他搜索关键词</p>
+                                    </div>
+                                `);
+                            }
+                        });
+                    } else {
+                        alert(`删除失败: ${response.error || '未知错误'}`);
+                    }
+                    
+                    documentIdToDelete = '';
+                },
+                error: function(xhr) {
+                    $('#deleteModal').modal('hide');
+                    $('#confirmDeleteBtn').prop('disabled', false).html('确认删除');
+                    
+                    let errorMessage = '删除失败';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        errorMessage = response.error || errorMessage;
+                    } catch (e) {}
+                    
+                    alert(errorMessage);
+                    documentIdToDelete = '';
+                }
+            });
+        });
+        
+        // 渲染分页
+        function renderPagination(currentPage, totalPages) {
+            if (totalPages <= 1) {
+                $('#pagination').empty();
+                return;
+            }
+            
+            let html = '';
+            
+            // 上一页按钮
+            html += `
+                <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                    <a class="page-link" href="#" data-page="${currentPage - 1}" aria-label="上一页">
+                        <span aria-hidden="true">&laquo;</span>
+                    </a>
+                </li>
+            `;
+            
+            // 页码按钮
+            const startPage = Math.max(1, currentPage - 2);
+            const endPage = Math.min(totalPages, startPage + 4);
+            
+            for (let i = startPage; i <= endPage; i++) {
+                html += `
+                    <li class="page-item ${i === currentPage ? 'active' : ''}">
+                        <a class="page-link" href="#" data-page="${i}">${i}</a>
+                    </li>
+                `;
+            }
+            
+            // 下一页按钮
+            html += `
+                <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                    <a class="page-link" href="#" data-page="${currentPage + 1}" aria-label="下一页">
+                        <span aria-hidden="true">&raquo;</span>
+                    </a>
+                </li>
+            `;
+            
+            $('#pagination').html(html);
+            
+            // 绑定分页点击事件
+            $('.page-link').on('click', function(e) {
+                e.preventDefault();
+                
+                if ($(this).parent().hasClass('disabled')) {
+                    return;
+                }
+                
+                const page = parseInt($(this).data('page'));
+                currentPage = page;
+                loadDocuments(page, pageSize, searchKeywords);
+            });
+        }
+        
+        // 获取状态类
+        function getStatusClass(status) {
+            switch (status) {
+                case 'DONE':
+                    return 'status-done';
+                case 'RUNNING':
+                    return 'status-processing';
+                case 'FAIL':
+                    return 'status-failed';
+                case 'CANCEL':
+                    return 'status-failed';
+                default:
+                    return 'status-unprocessed';
+            }
+        }
+        
+        // 获取状态文本
+        function getStatusText(status) {
+            switch (status) {
+                case 'DONE':
+                    return '已解析';
+                case 'RUNNING':
+                    return '解析中';
+                case 'FAIL':
+                    return '解析失败';
+                case 'CANCEL':
+                    return '已取消';
+                case 'UNSTART':
+                    return '未解析';
+                default:
+                    return '未知状态';
+            }
+        }
+        
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        // 格式化日期
+        function formatDate(dateString) {
+            if (!dateString) return '未知';
+            
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return '未知';
+            
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+    });
+</script>
+{% endblock %}
