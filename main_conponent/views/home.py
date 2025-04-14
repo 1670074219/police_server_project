@@ -167,6 +167,9 @@ def generate_response(message):
         )
 
         content = ""
+        think_flag = False
+        think_count = 0
+        think_idx = 0
         
         for chunk in response:
             # 发送文本
@@ -175,25 +178,39 @@ def generate_response(message):
                 # 确保标签能够正确传输，不被过滤
                 # 直接发送字符内容
                 yield f"data: {json.dumps({'content': char})}\n\n"
+                if char == ">" and think_flag == False:
+                    think_count += 1
+                    if think_count == 2:
+                        think_idx = new_content.find('</think>')  # 在新内容中查找，而不是在content中
+                        if think_idx != -1:  # 确保找到了标签
+                            logger.info(f"think_idx: {think_idx}, new_content: {new_content}")
+                            new_content = new_content[think_idx + 8:]  # 8是'</think>'的长度
+                            logger.info(f"处理后的new_content: {new_content}")
+                            think_flag = True
+                        else:
+                            logger.warning(f"未找到</think>标签，当前new_content: {new_content}")
             
+
+
             # 发送语音
-            try:
-                synthesizer.streaming_call(chunk.content[len(content):])
-                
-                # 给TTS服务一些时间生成音频
-                await_time = 0
-                while len(callback.audio_chunks) == 0 and await_time < 1.0 and not callback.is_error:
-                    time.sleep(0.1)
-                    await_time += 0.1
-                
-                # 发送可用的音频数据
-                if callback.audio_chunks:
-                    logger.info(f"发送 {len(callback.audio_chunks)} 个音频块")
-                    for audio_response in callback.audio_chunks:
-                        yield audio_response
-                    callback.audio_chunks = []
-            except Exception as e:
-                logger.error(f"处理音频时出错: {str(e)}")
+            if think_flag:
+                try:
+                    synthesizer.streaming_call(new_content)
+                    
+                    # 给TTS服务一些时间生成音频
+                    await_time = 0
+                    while len(callback.audio_chunks) == 0 and await_time < 1.0 and not callback.is_error:
+                        time.sleep(0.1)
+                        await_time += 0.1
+                    
+                    # 发送可用的音频数据
+                    if callback.audio_chunks:
+                        logger.info(f"发送 {len(callback.audio_chunks)} 个音频块")
+                        for audio_response in callback.audio_chunks:
+                            yield audio_response
+                        callback.audio_chunks = []
+                except Exception as e:
+                    logger.error(f"处理音频时出错: {str(e)}")
 
             content = chunk.content
         
