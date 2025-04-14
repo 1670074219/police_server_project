@@ -341,6 +341,16 @@
     #fileUpload {
       display: none;
     }
+    
+    /* 思考内容样式 - 类似Markdown引用 */
+    .think-content {
+      background-color: #f5f7f9;
+      border-left: 4px solid #b3c1cd;
+      padding: 10px;
+      margin: 5px 0;
+      color: #666;
+      line-height: 1.5;
+    }
 </style>
 {% endblock %}
 
@@ -395,6 +405,12 @@
 {% block script %}
 <script>
     $(document).ready(function() {
+        // 添加一个控制台警告，提醒用户需要重启服务器和刷新页面
+        console.warn("%c重要提示", "font-size:20px; color:red; font-weight:bold;");
+        console.warn("%c为了使<think>标签样式生效，请确保:", "font-size:14px; color:orange;");
+        console.warn("%c1. 重启服务器", "font-size:14px;");
+        console.warn("%c2. 清除浏览器缓存并强制刷新页面 (Ctrl+F5 或 Cmd+Shift+R)", "font-size:14px;");
+        
         const chatMessages = $('#chatMessages');
         const userInput = $('#userInput');
         const modelSelect = $('#modelSelect');
@@ -696,8 +712,50 @@
                                 console.log("[DEBUG] 解析的数据类型:", Object.keys(parsed));
                                 
                                 if (parsed.content) {
+                                    const char = parsed.content;
+                                    console.log("[CHAR DEBUG]", JSON.stringify(char));
+                                    
                                     // 直接添加单个字符
-                                    messageContent.append(parsed.content);
+                                    messageContent.append(char);
+                                    
+                                    // 每10个字符输出一次当前HTML内容，用于调试
+                                    if (Math.random() < 0.1) {  // 大约10%的概率记录
+                                        console.log("[HTML DEBUG] 当前消息HTML:", messageContent.html());
+                                    }
+                                    
+                                    // 检查是否完成了一个</think>标签
+                                    const contentHtml = messageContent.html();
+                                    if (contentHtml.includes('&lt;think&gt;') && contentHtml.includes('&lt;/think&gt;')) {
+                                        console.log("[DEBUG] 检测到HTML转义的think标签");
+                                        
+                                        // 处理HTML转义的标签
+                                        try {
+                                            const newHtml = contentHtml.replace(/&lt;think&gt;([\s\S]*?)&lt;\/think&gt;/g, function(match, content) {
+                                                console.log("[DEBUG] 匹配到转义的think内容:", content);
+                                                return '<div class="think-content">' + content + '</div>';
+                                            });
+                                            console.log("[DEBUG] 替换后的HTML:", newHtml);
+                                            messageContent.html(newHtml);
+                                        } catch (error) {
+                                            console.error("[ERROR] 替换转义think标签时出错:", error);
+                                        }
+                                    }
+                                    else if (contentHtml.includes('<think>') && contentHtml.includes('</think>')) {
+                                        console.log("[DEBUG] 检测到非转义的think标签");
+                                        
+                                        // 使用正则表达式一次性替换所有已完成的<think>内容
+                                        try {
+                                            const newHtml = contentHtml.replace(/<think>([\s\S]*?)<\/think>/g, function(match, content) {
+                                                console.log("[DEBUG] 匹配到think内容:", content);
+                                                return '<div class="think-content">' + content + '</div>';
+                                            });
+                                            console.log("[DEBUG] 替换后的HTML:", newHtml);
+                                            messageContent.html(newHtml);
+                                        } catch (error) {
+                                            console.error("[ERROR] 替换think标签时出错:", error);
+                                        }
+                                    }
+                                    
                                     scrollToBottom();
                                 } else if (parsed.audio_data) {
                                     // 收到音频数据，添加到队列

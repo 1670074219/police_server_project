@@ -170,7 +170,10 @@ def generate_response(message):
         
         for chunk in response:
             # 发送文本
-            for char in chunk.content[len(content):]:
+            new_content = chunk.content[len(content):]
+            for char in new_content:
+                # 确保标签能够正确传输，不被过滤
+                # 直接发送字符内容
                 yield f"data: {json.dumps({'content': char})}\n\n"
             
             # 发送语音
@@ -193,7 +196,6 @@ def generate_response(message):
                 logger.error(f"处理音频时出错: {str(e)}")
 
             content = chunk.content
-            logger.info(f"收到文本内容: '{content}'")
         
         # 完成TTS流式合成
         try:
