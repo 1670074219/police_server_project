@@ -34,4 +34,14 @@ urlpatterns = [
     path('api/text_to_speech', chat.text_to_speech, name='text_to_speech'),
 
     path('api/get_audio/<str:file_path>', home.get_audio_file, name='get_audio_file'),
+    
+    # 文档上传和解析
+    path('upload_documents', chat.upload_documents, name='upload_documents'),
+    
+    # 文档管理相关
+    path('document_management', chat.document_management, name='document_management'),
+    path('list_documents', chat.list_documents, name='list_documents'),
+    path('delete_document', chat.delete_document, name='delete_document'),
+
+    path(route='newchat', view=chat.newchat, name='newchat'),
 ]
